@@ -1,5 +1,5 @@
 1397 root@proxypro.ddns.net
-blackpro90
+truong13397
 worker2
 x
 50
