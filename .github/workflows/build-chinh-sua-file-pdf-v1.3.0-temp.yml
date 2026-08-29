@@ -1,0 +1,118 @@
+name: Build Chinh sua file PDF v1.3.0 Windows Offline
+
+on:
+  push:
+    branches:
+      - artifact-chinh-sua-file-pdf-v1.3.0-20260829
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout temporary build branch
+        uses: actions/checkout@v4
+
+      - name: Reconstruct verified v1.3.0 source
+        shell: pwsh
+        run: |
+          $files = Get-ChildItem 'build_payload_v130/part*.b64' | Sort-Object Name
+          if ($files.Count -ne 7) { throw "Expected 7 source payload parts, found $($files.Count)" }
+          $parts = $files | ForEach-Object { Get-Content $_.FullName -Raw }
+          $b64 = [string]::Concat([string[]]$parts)
+          [IO.File]::WriteAllBytes('Chinh-Sua-File-PDF-Source-v1.3.0.zip', [Convert]::FromBase64String($b64))
+          $hash = (Get-FileHash 'Chinh-Sua-File-PDF-Source-v1.3.0.zip' -Algorithm SHA256).Hash.ToLower()
+          if ($hash -ne '2a3fe32a6f5e5a028e8385261d01d4d9710e3c7723191b2c1b2a691ffe84f010') { throw "Source SHA256 mismatch: $hash" }
+          New-Item -ItemType Directory -Force -Path 'tools/chinh-sua-file-pdf-v1.3.0' | Out-Null
+          Expand-Archive -Path 'Chinh-Sua-File-PDF-Source-v1.3.0.zip' -DestinationPath 'tools/chinh-sua-file-pdf-v1.3.0' -Force
+
+      - name: Setup Python 3.12 x64
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          architecture: 'x64'
+
+      - name: Install build dependencies
+        shell: pwsh
+        working-directory: tools/chinh-sua-file-pdf-v1.3.0
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller
+
+      - name: Run 16 regression tests
+        shell: pwsh
+        working-directory: tools/chinh-sua-file-pdf-v1.3.0
+        run: |
+          $env:PYTHONPATH = "."
+          python -m unittest discover -s tests -p 'test_*.py' -v
+
+      - name: GUI responsive and smooth zoom smoke test
+        shell: pwsh
+        working-directory: tools/chinh-sua-file-pdf-v1.3.0
+        run: |
+          $env:PYTHONPATH = "."
+          python tests/gui_smoke.py
+
+      - name: Generate app icon and Windows metadata
+        shell: pwsh
+        working-directory: tools/chinh-sua-file-pdf-v1.3.0
+        run: python build_assets.py
+
+      - name: Build single-file offline EXE
+        shell: pwsh
+        working-directory: tools/chinh-sua-file-pdf-v1.3.0
+        run: |
+          pyinstaller --noconfirm --clean --onefile --windowed `
+            --name "Chinh-Sua-File-PDF-v1.3.0" `
+            --icon "app.ico" `
+            --version-file "version_info.txt" `
+            --add-data "app.ico;." `
+            --collect-all pypdfium2 `
+            --hidden-import PIL._tkinter_finder `
+            main.py
+
+      - name: Self-test bundled EXE on Windows
+        shell: pwsh
+        working-directory: tools/chinh-sua-file-pdf-v1.3.0
+        run: |
+          $p = Start-Process -FilePath ".\dist\Chinh-Sua-File-PDF-v1.3.0.exe" -ArgumentList "--self-test" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "Bundled EXE self-test failed with exit code $($p.ExitCode)" }
+
+      - name: Prepare delivery files
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path 'delivery-v130' | Out-Null
+          Copy-Item 'tools/chinh-sua-file-pdf-v1.3.0/dist/Chinh-Sua-File-PDF-v1.3.0.exe' 'delivery-v130/Chinh-Sua-File-PDF-v1.3.0.exe' -Force
+          Copy-Item 'Chinh-Sua-File-PDF-Source-v1.3.0.zip' 'delivery-v130/Chinh-Sua-File-PDF-Source-v1.3.0.zip' -Force
+          $exeHash = (Get-FileHash 'delivery-v130/Chinh-Sua-File-PDF-v1.3.0.exe' -Algorithm SHA256).Hash.ToLower()
+          $srcHash = (Get-FileHash 'delivery-v130/Chinh-Sua-File-PDF-Source-v1.3.0.zip' -Algorithm SHA256).Hash.ToLower()
+          @"
+          Chỉnh sửa file PDF v1.3.0
+          Người thiết kế: Nguyễn Huy Toàn
+          Đơn vị: Văn phòng Đảng ủy xã Thanh Lâm
+          Điện thoại: 0979 928 450
+          Build: Windows x64 • PyInstaller one-file • offline runtime included
+          Added: Tách trang đã chọn ra PDF riêng; file gốc không bị mất trang
+          Naming: ho so - trang 4.pdf; ho so - trang 6-9.pdf; tự tránh ghi đè bằng (2), (3)...
+          Changed: đổi tên ứng dụng thành Chỉnh sửa file PDF
+          Changed: responsive 3 cột với sash kéo được; toolbar 2 hàng tự co giãn; nút không cắt chữ
+          Changed: Đảo vùng chọn -> Đảo thứ tự trang đã chọn
+          Removed: Sắp xếp Scan 2 mặt
+          Preserved: smooth zoom cache, ghép PDF, đảo trang, xoay, kéo sắp xếp, Undo/Redo, restore, save-to-original, private backup + cleanup
+          Data safety: extract không sửa file nguồn; save file gốc vẫn backup + temp write + validate + atomic replace
+          Tests: 16 regression tests + GUI responsive/smooth zoom smoke + bundled EXE self-test on Windows
+          SHA256 EXE: $exeHash
+          SHA256 Source ZIP: $srcHash
+          "@ | Set-Content -Encoding UTF8 'delivery-v130/BUILD-TEST-REPORT-v1.3.0.txt'
+          "$exeHash  Chinh-Sua-File-PDF-v1.3.0.exe`n$srcHash  Chinh-Sua-File-PDF-Source-v1.3.0.zip" | Set-Content -Encoding ASCII 'delivery-v130/SHA256SUMS-v1.3.0.txt'
+
+      - name: Upload Windows offline package
+        uses: actions/upload-artifact@v4
+        with:
+          name: Chinh-Sua-File-PDF-v1.3.0-Windows-Offline
+          path: delivery-v130/*
+          if-no-files-found: error
+          retention-days: 30
