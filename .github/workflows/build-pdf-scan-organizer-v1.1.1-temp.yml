@@ -1,0 +1,139 @@
+name: Build PDF Scan Organizer v1.1.1 Windows Offline
+
+on:
+  push:
+    branches:
+      - artifact-pdf-scan-organizer-v1.1.1-20260829
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout temporary build branch
+        uses: actions/checkout@v4
+
+      - name: Reconstruct verified v1.1.0 base source
+        shell: pwsh
+        run: |
+          $files = Get-ChildItem 'build_payload_v110/part*.b64' | Sort-Object Name
+          if ($files.Count -ne 9) { throw "Expected 9 base payload parts, found $($files.Count)" }
+          $parts = $files | ForEach-Object { Get-Content $_.FullName -Raw }
+          $b64 = [string]::Concat([string[]]$parts)
+          [IO.File]::WriteAllBytes('PDF-Scan-Organizer-Source-v1.1.0-base.zip', [Convert]::FromBase64String($b64))
+          $hash = (Get-FileHash 'PDF-Scan-Organizer-Source-v1.1.0-base.zip' -Algorithm SHA256).Hash.ToLower()
+          if ($hash -ne '898627b41b79565176a3b132601e8ed32aac817ac1248bccf33095f11aadd4dc') { throw "Base source SHA256 mismatch: $hash" }
+          New-Item -ItemType Directory -Force -Path 'tools/pdf-scan-organizer-v1.1.1' | Out-Null
+          Expand-Archive -Path 'PDF-Scan-Organizer-Source-v1.1.0-base.zip' -DestinationPath 'tools/pdf-scan-organizer-v1.1.1' -Force
+
+      - name: Setup Python 3.12 x64
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          architecture: 'x64'
+
+      - name: Apply verified v1.1.1 patch
+        shell: pwsh
+        run: |
+          python build_tools/patch_v111.py tools/pdf-scan-organizer-v1.1.1
+          if ($LASTEXITCODE -ne 0) { throw "v1.1.1 patch failed" }
+
+      - name: Install build dependencies
+        shell: pwsh
+        working-directory: tools/pdf-scan-organizer-v1.1.1
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller
+
+      - name: Run 9 regression tests
+        shell: pwsh
+        working-directory: tools/pdf-scan-organizer-v1.1.1
+        run: |
+          $env:PYTHONPATH = "."
+          python -m unittest discover -s tests -v
+
+      - name: GUI construction smoke test
+        shell: pwsh
+        working-directory: tools/pdf-scan-organizer-v1.1.1
+        run: |
+          @'
+          from pdf_scan_organizer.app import PdfScanOrganizerApp
+          app = PdfScanOrganizerApp()
+          app.update_idletasks()
+          texts = []
+          def walk(widget):
+              try:
+                  if widget.winfo_class() == "Button":
+                      texts.append(widget.cget("text"))
+              except Exception:
+                  pass
+              for child in widget.winfo_children():
+                  walk(child)
+          walk(app)
+          assert "✓ ĐÁNH DẤU\nHOÀN THÀNH" in texts
+          assert "✓ HOÀN TẤT\nTHƯ MỤC" in texts
+          app.destroy()
+          print("GUI_SMOKE_OK")
+          '@ | Set-Content -Encoding UTF8 gui_smoke.py
+          python gui_smoke.py
+
+      - name: Generate app icon and Windows metadata
+        shell: pwsh
+        working-directory: tools/pdf-scan-organizer-v1.1.1
+        run: python build_assets.py
+
+      - name: Build single-file offline EXE
+        shell: pwsh
+        working-directory: tools/pdf-scan-organizer-v1.1.1
+        run: |
+          pyinstaller --noconfirm --clean --onefile --windowed `
+            --name "PDF-Scan-Organizer-v1.1.1" `
+            --icon "app.ico" `
+            --version-file "version_info.txt" `
+            --add-data "app.ico;." `
+            --collect-all pypdfium2 `
+            --hidden-import PIL._tkinter_finder `
+            main.py
+
+      - name: Self-test bundled EXE on Windows
+        shell: pwsh
+        working-directory: tools/pdf-scan-organizer-v1.1.1
+        run: |
+          $p = Start-Process -FilePath ".\dist\PDF-Scan-Organizer-v1.1.1.exe" -ArgumentList "--self-test" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "Bundled EXE self-test failed with exit code $($p.ExitCode)" }
+
+      - name: Prepare delivery files
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path 'delivery-v111' | Out-Null
+          Copy-Item 'tools/pdf-scan-organizer-v1.1.1/dist/PDF-Scan-Organizer-v1.1.1.exe' 'delivery-v111/PDF-Scan-Organizer-v1.1.1.exe' -Force
+          Push-Location 'tools/pdf-scan-organizer-v1.1.1'
+          Compress-Archive -Path 'pdf_scan_organizer','tests','main.py','requirements.txt','README.md','build_assets.py' -DestinationPath '../../delivery-v111/PDF-Scan-Organizer-Source-v1.1.1.zip' -Force
+          Pop-Location
+          $exeHash = (Get-FileHash 'delivery-v111/PDF-Scan-Organizer-v1.1.1.exe' -Algorithm SHA256).Hash.ToLower()
+          $srcHash = (Get-FileHash 'delivery-v111/PDF-Scan-Organizer-Source-v1.1.1.zip' -Algorithm SHA256).Hash.ToLower()
+          @"
+          PDF Scan Organizer v1.1.1
+          Người thiết kế: Nguyễn Huy Toàn
+          Đơn vị: Văn phòng Đảng ủy xã Thanh Lâm
+          Điện thoại: 0979 928 450
+          Build: Windows x64 • PyInstaller one-file • offline runtime included
+          Added: nút HOÀN TẤT THƯ MỤC cạnh ĐÁNH DẤU HOÀN THÀNH
+          Safety: chỉ dọn backup khi không còn thay đổi chưa lưu và tất cả PDF đã hoàn thành
+          Cleanup: chỉ xóa đúng backup do app tạo; giữ nguyên PDF và file lạ
+          Tests: 9 regression tests + GUI smoke + bundled EXE self-test
+          SHA256 EXE: $exeHash
+          SHA256 Source ZIP: $srcHash
+          "@ | Set-Content -Encoding UTF8 'delivery-v111/BUILD-TEST-REPORT-v1.1.1.txt'
+          "$exeHash  PDF-Scan-Organizer-v1.1.1.exe`n$srcHash  PDF-Scan-Organizer-Source-v1.1.1.zip" | Set-Content -Encoding ASCII 'delivery-v111/SHA256SUMS-v1.1.1.txt'
+
+      - name: Upload Windows offline package
+        uses: actions/upload-artifact@v4
+        with:
+          name: PDF-Scan-Organizer-v1.1.1-Windows-Offline
+          path: delivery-v111/*
+          if-no-files-found: error
+          retention-days: 30
