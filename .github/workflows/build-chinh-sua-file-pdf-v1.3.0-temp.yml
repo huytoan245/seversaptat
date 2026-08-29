@@ -19,9 +19,21 @@ jobs:
       - name: Reconstruct verified v1.3.0 source
         shell: pwsh
         run: |
-          $files = Get-ChildItem 'build_payload_v130/part*.b64' | Sort-Object Name
-          if ($files.Count -ne 7) { throw "Expected 7 source payload parts, found $($files.Count)" }
-          $parts = $files | ForEach-Object { Get-Content $_.FullName -Raw }
+          $paths = @(
+            'build_payload_v130/part00_0.b64',
+            'build_payload_v130/part00_1_0.b64',
+            'build_payload_v130/part00_1_1.b64',
+            'build_payload_v130/part00_2.b64',
+            'build_payload_v130/part00_3.b64',
+            'build_payload_v130/part01.b64',
+            'build_payload_v130/part02.b64',
+            'build_payload_v130/part03.b64',
+            'build_payload_v130/part04.b64',
+            'build_payload_v130/part05.b64',
+            'build_payload_v130/part06.b64'
+          )
+          foreach ($p in $paths) { if (-not (Test-Path $p)) { throw "Missing payload: $p" } }
+          $parts = $paths | ForEach-Object { Get-Content $_ -Raw }
           $b64 = [string]::Concat([string[]]$parts)
           [IO.File]::WriteAllBytes('Chinh-Sua-File-PDF-Source-v1.3.0.zip', [Convert]::FromBase64String($b64))
           $hash = (Get-FileHash 'Chinh-Sua-File-PDF-Source-v1.3.0.zip' -Algorithm SHA256).Hash.ToLower()
