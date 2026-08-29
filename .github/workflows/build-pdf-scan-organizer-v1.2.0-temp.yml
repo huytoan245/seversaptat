@@ -1,0 +1,137 @@
+name: Build PDF Scan Organizer v1.2.0 Windows Offline
+
+on:
+  push:
+    branches:
+      - artifact-pdf-scan-organizer-v1.2.0-20260829
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout temporary build branch
+        uses: actions/checkout@v4
+
+      - name: Reconstruct verified v1.1.0 base source
+        shell: pwsh
+        run: |
+          $files = Get-ChildItem 'build_payload_v110/part*.b64' | Sort-Object Name
+          if ($files.Count -ne 9) { throw "Expected 9 base payload parts, found $($files.Count)" }
+          $parts = $files | ForEach-Object { Get-Content $_.FullName -Raw }
+          $b64 = [string]::Concat([string[]]$parts)
+          [IO.File]::WriteAllBytes('PDF-Scan-Organizer-Source-v1.1.0-base.zip', [Convert]::FromBase64String($b64))
+          $hash = (Get-FileHash 'PDF-Scan-Organizer-Source-v1.1.0-base.zip' -Algorithm SHA256).Hash.ToLower()
+          if ($hash -ne '898627b41b79565176a3b132601e8ed32aac817ac1248bccf33095f11aadd4dc') { throw "Base source SHA256 mismatch: $hash" }
+          New-Item -ItemType Directory -Force -Path 'tools/pdf-scan-organizer-v1.2.0' | Out-Null
+          Expand-Archive -Path 'PDF-Scan-Organizer-Source-v1.1.0-base.zip' -DestinationPath 'tools/pdf-scan-organizer-v1.2.0' -Force
+
+      - name: Setup Python 3.12 x64
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          architecture: 'x64'
+
+      - name: Apply verified v1.1.1 baseline patch
+        shell: pwsh
+        run: |
+          python build_tools/patch_v111.py tools/pdf-scan-organizer-v1.2.0
+          if ($LASTEXITCODE -ne 0) { throw "v1.1.1 baseline patch failed" }
+
+      - name: Apply verified v1.2.0 source overlay
+        shell: pwsh
+        run: |
+          $files = Get-ChildItem 'build_payload_v120/part*.b64' | Sort-Object Name
+          if ($files.Count -ne 8) { throw "Expected 8 v1.2.0 payload parts, found $($files.Count)" }
+          $parts = $files | ForEach-Object { Get-Content $_.FullName -Raw }
+          $b64 = [string]::Concat([string[]]$parts)
+          [IO.File]::WriteAllBytes('v120-overlay.zip', [Convert]::FromBase64String($b64))
+          $hash = (Get-FileHash 'v120-overlay.zip' -Algorithm SHA256).Hash.ToLower()
+          if ($hash -ne 'fcf38e6e47a286d834fda8f588b212fd9ea62510c6826926ec6239df29f1e467') { throw "v1.2.0 overlay SHA256 mismatch: $hash" }
+          Expand-Archive -Path 'v120-overlay.zip' -DestinationPath 'tools/pdf-scan-organizer-v1.2.0' -Force
+
+      - name: Install build dependencies
+        shell: pwsh
+        working-directory: tools/pdf-scan-organizer-v1.2.0
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller
+
+      - name: Run 13 regression tests
+        shell: pwsh
+        working-directory: tools/pdf-scan-organizer-v1.2.0
+        run: |
+          $env:PYTHONPATH = "."
+          python -m unittest discover -s tests -p 'test_*.py' -v
+
+      - name: GUI and smooth zoom smoke test
+        shell: pwsh
+        working-directory: tools/pdf-scan-organizer-v1.2.0
+        run: |
+          $env:PYTHONPATH = "."
+          python tests/gui_smoke.py
+
+      - name: Generate app icon and Windows metadata
+        shell: pwsh
+        working-directory: tools/pdf-scan-organizer-v1.2.0
+        run: python build_assets.py
+
+      - name: Build single-file offline EXE
+        shell: pwsh
+        working-directory: tools/pdf-scan-organizer-v1.2.0
+        run: |
+          pyinstaller --noconfirm --clean --onefile --windowed `
+            --name "PDF-Scan-Organizer-v1.2.0" `
+            --icon "app.ico" `
+            --version-file "version_info.txt" `
+            --add-data "app.ico;." `
+            --collect-all pypdfium2 `
+            --hidden-import PIL._tkinter_finder `
+            main.py
+
+      - name: Self-test bundled EXE on Windows
+        shell: pwsh
+        working-directory: tools/pdf-scan-organizer-v1.2.0
+        run: |
+          $p = Start-Process -FilePath ".\dist\PDF-Scan-Organizer-v1.2.0.exe" -ArgumentList "--self-test" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "Bundled EXE self-test failed with exit code $($p.ExitCode)" }
+
+      - name: Prepare delivery files
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path 'delivery-v120' | Out-Null
+          Copy-Item 'tools/pdf-scan-organizer-v1.2.0/dist/PDF-Scan-Organizer-v1.2.0.exe' 'delivery-v120/PDF-Scan-Organizer-v1.2.0.exe' -Force
+          Push-Location 'tools/pdf-scan-organizer-v1.2.0'
+          Compress-Archive -Path 'pdf_scan_organizer','tests','main.py','requirements.txt','README.md','build_assets.py' -DestinationPath '../../delivery-v120/PDF-Scan-Organizer-Source-v1.2.0.zip' -Force
+          Pop-Location
+          $exeHash = (Get-FileHash 'delivery-v120/PDF-Scan-Organizer-v1.2.0.exe' -Algorithm SHA256).Hash.ToLower()
+          $srcHash = (Get-FileHash 'delivery-v120/PDF-Scan-Organizer-Source-v1.2.0.zip' -Algorithm SHA256).Hash.ToLower()
+          @"
+          PDF Scan Organizer v1.2.0
+          Người thiết kế: Nguyễn Huy Toàn
+          Đơn vị: Văn phòng Đảng ủy xã Thanh Lâm
+          Điện thoại: 0979 928 450
+          Build: Windows x64 • PyInstaller one-file • offline runtime included
+          Added: ghép toàn bộ trang của một PDF khác vào cuối file PDF đang mở
+          Changed: zoom dùng ảnh master cache trong RAM; kéo zoom không render lại PDF liên tục
+          Changed: nút DỌN DẸP BACKUP thay cho HOÀN TẤT THƯ MỤC
+          Backup: %LOCALAPPDATA%\PDF Scan Organizer\Backups (thường trên ổ C)
+          Cleanup: quét backup của ứng dụng và xóa backup cũ, giữ backup của file hiện đang làm việc
+          Compatibility: nhận biết/migrate backup kiểu v1.1.x cạnh thư mục tài liệu khi gặp lại file
+          Data safety: source PDF ghép không bị sửa; file đích vẫn dùng backup + temp write + validate + atomic replace
+          Tests: 13 regression tests + GUI/smooth-zoom smoke + bundled EXE self-test on Windows
+          SHA256 EXE: $exeHash
+          SHA256 Source ZIP: $srcHash
+          "@ | Set-Content -Encoding UTF8 'delivery-v120/BUILD-TEST-REPORT-v1.2.0.txt'
+          "$exeHash  PDF-Scan-Organizer-v1.2.0.exe`n$srcHash  PDF-Scan-Organizer-Source-v1.2.0.zip" | Set-Content -Encoding ASCII 'delivery-v120/SHA256SUMS-v1.2.0.txt'
+
+      - name: Upload Windows offline package
+        uses: actions/upload-artifact@v4
+        with:
+          name: PDF-Scan-Organizer-v1.2.0-Windows-Offline
+          path: delivery-v120/*
+          if-no-files-found: error
+          retention-days: 30
