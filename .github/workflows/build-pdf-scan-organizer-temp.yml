@@ -1,0 +1,103 @@
+name: Build PDF Scan Organizer v1.0.0 Windows Offline
+
+on:
+  push:
+    branches:
+      - artifact-pdf-scan-organizer-v1.0.0-20260829
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout temporary build branch
+        uses: actions/checkout@v4
+
+      - name: Reconstruct source package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path tools | Out-Null
+          $parts = 0..4 | ForEach-Object { Get-Content ("build_payload\part{0:D2}.b64" -f $_) -Raw }
+          $b64 = [string]::Concat($parts)
+          [IO.File]::WriteAllBytes("tools\pdf-scan-organizer-source.zip", [Convert]::FromBase64String($b64))
+          $hash = (Get-FileHash "tools\pdf-scan-organizer-source.zip" -Algorithm SHA256).Hash.ToLower()
+          if ($hash -ne "ad10ae4d5c726ec367e19d62a257ba293ba2527e5ae75a9366c7427b67f6c96f") { throw "Source payload SHA256 mismatch: $hash" }
+          Expand-Archive -Path "tools\pdf-scan-organizer-source.zip" -DestinationPath "tools\pdf-scan-organizer" -Force
+
+      - name: Setup Python 3.12 x64
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          architecture: 'x64'
+
+      - name: Install build dependencies
+        shell: pwsh
+        working-directory: tools/pdf-scan-organizer
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller
+
+      - name: Run regression tests
+        shell: pwsh
+        working-directory: tools/pdf-scan-organizer
+        run: |
+          $env:PYTHONPATH = "."
+          python -m unittest discover -s tests -v
+
+      - name: Generate app icon and Windows metadata
+        shell: pwsh
+        working-directory: tools/pdf-scan-organizer
+        run: python build_assets.py
+
+      - name: Build single-file offline EXE
+        shell: pwsh
+        working-directory: tools/pdf-scan-organizer
+        run: |
+          pyinstaller --noconfirm --clean --onefile --windowed `
+            --name "PDF-Scan-Organizer-v1.0.0" `
+            --icon "app.ico" `
+            --version-file "version_info.txt" `
+            --collect-all pypdfium2 `
+            --collect-all PIL `
+            main.py
+
+      - name: Self-test bundled EXE on Windows
+        shell: pwsh
+        working-directory: tools/pdf-scan-organizer
+        run: |
+          $p = Start-Process -FilePath ".\dist\PDF-Scan-Organizer-v1.0.0.exe" -ArgumentList "--self-test" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "Bundled EXE self-test failed with exit code $($p.ExitCode)" }
+
+      - name: Prepare delivery files
+        shell: pwsh
+        working-directory: tools/pdf-scan-organizer
+        run: |
+          New-Item -ItemType Directory -Force -Path artifact | Out-Null
+          Copy-Item ".\dist\PDF-Scan-Organizer-v1.0.0.exe" ".\artifact\PDF-Scan-Organizer-v1.0.0.exe"
+          Copy-Item "..\pdf-scan-organizer-source.zip" ".\artifact\PDF-Scan-Organizer-Source-v1.0.0.zip"
+          $exeHash = (Get-FileHash ".\artifact\PDF-Scan-Organizer-v1.0.0.exe" -Algorithm SHA256).Hash.ToLower()
+          $srcHash = (Get-FileHash ".\artifact\PDF-Scan-Organizer-Source-v1.0.0.zip" -Algorithm SHA256).Hash.ToLower()
+          @"
+          PDF Scan Organizer v1.0.0
+          Thiết kế bởi: Nguyễn Huy Toàn
+          Nền tảng build: Windows x64
+          Kiểu đóng gói: 1 file EXE portable/offline bằng PyInstaller
+          Internet khi chạy: Không cần
+          Python/Node trên máy người dùng: Không cần
+          Kiểm thử build: unittest + bundled EXE --self-test trên Windows
+          Cơ chế bảo vệ file: backup gốc + ghi file tạm + kiểm tra + atomic replace
+          SHA256 EXE: $exeHash
+          SHA256 Source ZIP: $srcHash
+          "@ | Set-Content -Encoding UTF8 ".\artifact\BUILD-TEST-REPORT.txt"
+          "$exeHash  PDF-Scan-Organizer-v1.0.0.exe`n$srcHash  PDF-Scan-Organizer-Source-v1.0.0.zip" | Set-Content -Encoding ASCII ".\artifact\SHA256SUMS.txt"
+
+      - name: Upload Windows offline package
+        uses: actions/upload-artifact@v4
+        with:
+          name: PDF-Scan-Organizer-v1.0.0-Windows-Offline
+          path: tools/pdf-scan-organizer/artifact/*
+          if-no-files-found: error
+          retention-days: 30
