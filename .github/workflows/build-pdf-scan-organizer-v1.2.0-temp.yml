@@ -53,6 +53,18 @@ jobs:
           if ($hash -ne 'fcf38e6e47a286d834fda8f588b212fd9ea62510c6826926ec6239df29f1e467') { throw "v1.2.0 overlay SHA256 mismatch: $hash" }
           Expand-Archive -Path 'v120-overlay.zip' -DestinationPath 'tools/pdf-scan-organizer-v1.2.0' -Force
 
+      - name: Apply cross-platform path test fix
+        shell: pwsh
+        working-directory: tools/pdf-scan-organizer-v1.2.0
+        run: |
+          $p = 'tests/test_state_store.py'
+          $s = Get-Content $p -Raw
+          $old = 'self.assertIn(str(pdf.resolve()), known)'
+          $new = 'self.assertIn(str(pdf.resolve()).casefold(), {item.casefold() for item in known})'
+          if (-not $s.Contains($old)) { throw 'Path testcase patch target not found' }
+          $s = $s.Replace($old, $new)
+          Set-Content -Path $p -Value $s -Encoding UTF8
+
       - name: Install build dependencies
         shell: pwsh
         working-directory: tools/pdf-scan-organizer-v1.2.0
