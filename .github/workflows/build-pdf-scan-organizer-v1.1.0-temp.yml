@@ -1,15 +1,13 @@
 name: Build PDF Scan Organizer v1.1.0 Windows Offline
 
 on:
-  workflow_dispatch:
   push:
     branches:
       - artifact-pdf-scan-organizer-v1.1.0-20260829
-    paths-ignore:
-      - 'delivery/**'
+  workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build:
@@ -21,20 +19,18 @@ jobs:
       - name: Reconstruct verified source package
         shell: pwsh
         run: |
-          $files = Get-ChildItem 'build_payload_v110/part*.b64' | Sort-Object Name
-          if ($files.Count -ne 9) { throw "Expected 9 payload parts, found $($files.Count)" }
-          $parts = $files | ForEach-Object { Get-Content $_.FullName -Raw }
-          $b64 = [string]::Concat([string[]]$parts)
-          [IO.File]::WriteAllBytes('pdf-scan-organizer-v1.1.0-source.zip', [Convert]::FromBase64String($b64))
-          $hash = (Get-FileHash 'pdf-scan-organizer-v1.1.0-source.zip' -Algorithm SHA256).Hash.ToLower()
-          if ($hash -ne '898627b41b79565176a3b132601e8ed32aac817ac1248bccf33095f11aadd4dc') { throw "Source SHA256 mismatch: $hash" }
-          New-Item -ItemType Directory -Force -Path 'tools/pdf-scan-organizer-v1.1.0' | Out-Null
-          Expand-Archive -Path 'pdf-scan-organizer-v1.1.0-source.zip' -DestinationPath 'tools/pdf-scan-organizer-v1.1.0' -Force
+          New-Item -ItemType Directory -Force -Path tools | Out-Null
+          $parts = 0..8 | ForEach-Object { Get-Content ("build_payload_v110\part{0:D2}.b64" -f $_) -Raw }
+          $b64 = [string]::Concat($parts)
+          [IO.File]::WriteAllBytes("tools\pdf-scan-organizer-v1.1.0-source.zip", [Convert]::FromBase64String($b64))
+          $hash = (Get-FileHash "tools\pdf-scan-organizer-v1.1.0-source.zip" -Algorithm SHA256).Hash.ToLower()
+          if ($hash -ne "898627b41b79565176a3b132601e8ed32aac817ac1248bccf33095f11aadd4dc") { throw "Source payload SHA256 mismatch: $hash" }
+          Expand-Archive -Path "tools\pdf-scan-organizer-v1.1.0-source.zip" -DestinationPath "tools\pdf-scan-organizer-v1.1.0" -Force
 
-      - name: Setup Python 3.13 x64
+      - name: Setup Python 3.12 x64
         uses: actions/setup-python@v5
         with:
-          python-version: '3.13'
+          python-version: '3.12'
           architecture: 'x64'
 
       - name: Install build dependencies
@@ -51,12 +47,12 @@ jobs:
           $env:PYTHONPATH = "."
           python -m unittest discover -s tests -v
 
-      - name: Generate icon and Windows metadata
+      - name: Generate app icon and Windows metadata
         shell: pwsh
         working-directory: tools/pdf-scan-organizer-v1.1.0
         run: python build_assets.py
 
-      - name: Build one-file offline EXE
+      - name: Build single-file offline EXE
         shell: pwsh
         working-directory: tools/pdf-scan-organizer-v1.1.0
         run: |
@@ -66,39 +62,45 @@ jobs:
             --version-file "version_info.txt" `
             --add-data "app.ico;." `
             --collect-all pypdfium2 `
-            --hidden-import PIL._tkinter_finder `
+            --collect-all PIL `
             main.py
 
       - name: Self-test bundled EXE on Windows
         shell: pwsh
         working-directory: tools/pdf-scan-organizer-v1.1.0
         run: |
-          & ".\dist\PDF-Scan-Organizer-v1.1.0.exe" --self-test
-          if ($LASTEXITCODE -ne 0) { throw "Bundled EXE self-test failed with exit code $LASTEXITCODE" }
+          $p = Start-Process -FilePath ".\dist\PDF-Scan-Organizer-v1.1.0.exe" -ArgumentList "--self-test" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "Bundled EXE self-test failed with exit code $($p.ExitCode)" }
 
       - name: Prepare delivery files
         shell: pwsh
+        working-directory: tools/pdf-scan-organizer-v1.1.0
         run: |
-          New-Item -ItemType Directory -Force -Path 'delivery' | Out-Null
-          Copy-Item 'tools/pdf-scan-organizer-v1.1.0/dist/PDF-Scan-Organizer-v1.1.0.exe' 'delivery/PDF-Scan-Organizer-v1.1.0.exe' -Force
-          Copy-Item 'pdf-scan-organizer-v1.1.0-source.zip' 'delivery/PDF-Scan-Organizer-Source-v1.1.0.zip' -Force
-          $hash = (Get-FileHash 'delivery/PDF-Scan-Organizer-v1.1.0.exe' -Algorithm SHA256).Hash.ToLower()
+          New-Item -ItemType Directory -Force -Path artifact | Out-Null
+          Copy-Item ".\dist\PDF-Scan-Organizer-v1.1.0.exe" ".\artifact\PDF-Scan-Organizer-v1.1.0.exe"
+          Copy-Item "..\pdf-scan-organizer-v1.1.0-source.zip" ".\artifact\PDF-Scan-Organizer-Source-v1.1.0.zip"
+          $exeHash = (Get-FileHash ".\artifact\PDF-Scan-Organizer-v1.1.0.exe" -Algorithm SHA256).Hash.ToLower()
+          $srcHash = (Get-FileHash ".\artifact\PDF-Scan-Organizer-Source-v1.1.0.zip" -Algorithm SHA256).Hash.ToLower()
           @"
-PDF Scan Organizer v1.1.0
-Người thiết kế: Nguyễn Huy Toàn
-Đơn vị: Văn phòng Đảng ủy xã Thanh Lâm
-Điện thoại: 0979 928 450
-Build: Windows x64, PyInstaller one-file, offline runtime included
-Runtime network: không yêu cầu
-Tests: 7 regression tests + bundled EXE --self-test
-SHA256 EXE: $hash
-"@ | Set-Content -Encoding UTF8 'delivery/BUILD-TEST-REPORT-v1.1.0.txt'
+          PDF Scan Organizer v1.1.0
+          Người thiết kế: Nguyễn Huy Toàn
+          Đơn vị: Văn phòng Đảng ủy xã Thanh Lâm
+          Điện thoại: 0979 928 450
+          Nền tảng build: Windows x64
+          Kiểu đóng gói: 1 file EXE portable/offline bằng PyInstaller
+          Internet khi chạy: Không cần
+          Python/Node trên máy người dùng: Không cần
+          Kiểm thử build: 7 regression tests + bundled EXE --self-test trên Windows
+          Cơ chế bảo vệ file: backup gốc + ghi file tạm + kiểm tra + atomic replace
+          SHA256 EXE: $exeHash
+          SHA256 Source ZIP: $srcHash
+          "@ | Set-Content -Encoding UTF8 ".\artifact\BUILD-TEST-REPORT-v1.1.0.txt"
+          "$exeHash  PDF-Scan-Organizer-v1.1.0.exe`n$srcHash  PDF-Scan-Organizer-Source-v1.1.0.zip" | Set-Content -Encoding ASCII ".\artifact\SHA256SUMS-v1.1.0.txt"
 
-      - name: Commit verified delivery back to temporary branch
-        shell: pwsh
-        run: |
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add delivery/PDF-Scan-Organizer-v1.1.0.exe delivery/PDF-Scan-Organizer-Source-v1.1.0.zip delivery/BUILD-TEST-REPORT-v1.1.0.txt
-          git commit -m 'Build PDF Scan Organizer v1.1.0 Windows offline' || echo 'Nothing to commit'
-          git push
+      - name: Upload Windows offline package
+        uses: actions/upload-artifact@v4
+        with:
+          name: PDF-Scan-Organizer-v1.1.0-Windows-Offline
+          path: tools/pdf-scan-organizer-v1.1.0/artifact/*
+          if-no-files-found: error
+          retention-days: 30
