@@ -18,17 +18,18 @@ jobs:
       - name: Checkout build branch
         uses: actions/checkout@v4
 
-      - name: Reconstruct source directory
-        shell: pwsh
-        run: |
-          Remove-Item -Recurse -Force "tools\pdf-scan-organizer-v1.2.0" -ErrorAction SilentlyContinue
-          Expand-Archive -Path "tools\PDF-Scan-Organizer-Source-v1.2.0.zip" -DestinationPath "tools\pdf-scan-organizer-v1.2.0" -Force
-
       - name: Setup Python 3.13 x64
         uses: actions/setup-python@v5
         with:
           python-version: '3.13'
           architecture: 'x64'
+
+      - name: Reconstruct source directory
+        shell: pwsh
+        run: |
+          Remove-Item -Recurse -Force "tools\pdf-scan-organizer-v1.2.0" -ErrorAction SilentlyContinue
+          python -m zipfile -e "tools\PDF-Scan-Organizer-Source-v1.2.0.zip" "tools\pdf-scan-organizer-v1.2.0"
+          if ($LASTEXITCODE -ne 0) { throw "Source ZIP extraction failed" }
 
       - name: Install build dependencies
         shell: pwsh
