@@ -79,15 +79,15 @@ jobs:
           Copy-Item "tools\pdf-scan-organizer-v1.2.0\app-icon-preview.png" "delivery\PDF-Scan-Organizer-v1.2.0-icon.png" -Force
           $hash = (Get-FileHash "delivery\PDF-Scan-Organizer-v1.2.0.exe" -Algorithm SHA256).Hash.ToLower()
           @"
-PDF Scan Organizer v1.2.0
-Thiết kế: Nguyễn Huy Toàn
-Đơn vị: Văn phòng Đảng ủy xã Thanh Lâm
-Điện thoại: 0979 928 450
-Build: Windows x64 • PyInstaller one-file • offline runtime included
-Runtime network: không yêu cầu
-Tests: unittest regression + Python self-test + bundled EXE self-test
-SHA256 EXE: $hash
-"@ | Set-Content -Encoding UTF8 "delivery\BUILD-TEST-REPORT-v1.2.0.txt"
+          PDF Scan Organizer v1.2.0
+          Thiết kế: Nguyễn Huy Toàn
+          Đơn vị: Văn phòng Đảng ủy xã Thanh Lâm
+          Điện thoại: 0979 928 450
+          Build: Windows x64 - PyInstaller one-file - offline runtime included
+          Runtime network: không yêu cầu
+          Tests: unittest regression + Python self-test + bundled EXE self-test
+          SHA256 EXE: $hash
+          "@ | Set-Content -Encoding UTF8 "delivery\BUILD-TEST-REPORT-v1.2.0.txt"
 
       - name: Commit delivery to build branch
         shell: pwsh
