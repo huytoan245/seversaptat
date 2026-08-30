@@ -1,0 +1,155 @@
+name: Build Chinh sua file PDF v1.4.0 Windows Offline
+
+on:
+  push:
+    branches:
+      - artifact-chinh-sua-file-pdf-v1.4.0-20260830
+    paths-ignore:
+      - 'delivery-v140/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout v1.4 build branch
+        uses: actions/checkout@v4
+
+      - name: Reconstruct exact verified v1.3.0 baseline
+        shell: pwsh
+        run: |
+          $paths = @(
+            'build_payload_v130/part00_0.b64',
+            'build_payload_v130/part00_1_0.b64',
+            'build_payload_v130/part00_1_1.b64',
+            'build_payload_v130/part00_2.b64',
+            'build_payload_v130/part00_3.b64',
+            'build_payload_v130/part01.b64',
+            'build_payload_v130/part02.b64',
+            'build_payload_v130/part03.b64',
+            'build_payload_v130/part04.b64',
+            'build_payload_v130/part05.b64',
+            'build_payload_v130/part06.b64'
+          )
+          foreach ($p in $paths) { if (-not (Test-Path $p)) { throw "Missing baseline payload: $p" } }
+          $parts = $paths | ForEach-Object { Get-Content $_ -Raw }
+          $b64 = [string]::Concat([string[]]$parts)
+          [IO.File]::WriteAllBytes('Chinh-Sua-File-PDF-Source-v1.3.0.zip', [Convert]::FromBase64String($b64))
+          $hash = (Get-FileHash 'Chinh-Sua-File-PDF-Source-v1.3.0.zip' -Algorithm SHA256).Hash.ToLower()
+          if ($hash -ne '2a3fe32a6f5e5a028e8385261d01d4d9710e3c7723191b2c1b2a691ffe84f010') { throw "v1.3 baseline SHA256 mismatch: $hash" }
+          New-Item -ItemType Directory -Force -Path 'tools/chinh-sua-file-pdf-v1.4.0' | Out-Null
+          Expand-Archive -Path 'Chinh-Sua-File-PDF-Source-v1.3.0.zip' -DestinationPath 'tools/chinh-sua-file-pdf-v1.4.0' -Force
+
+      - name: Setup Python 3.12 x64
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          architecture: 'x64'
+
+      - name: Apply v1.4.0 patch
+        shell: pwsh
+        run: |
+          python build_tools/patch_v140.py tools/chinh-sua-file-pdf-v1.4.0
+          if ($LASTEXITCODE -ne 0) { throw "v1.4 patch failed" }
+          $version = Get-Content 'tools/chinh-sua-file-pdf-v1.4.0/pdf_scan_organizer/__init__.py' -Raw
+          if ($version -notmatch '1\.4\.0') { throw 'Version bump missing' }
+
+      - name: Package patched v1.4.0 source
+        shell: pwsh
+        run: |
+          Compress-Archive -Path 'tools/chinh-sua-file-pdf-v1.4.0/*' -DestinationPath 'Chinh-Sua-File-PDF-Source-v1.4.0.zip' -Force
+
+      - name: Install build dependencies
+        shell: pwsh
+        working-directory: tools/chinh-sua-file-pdf-v1.4.0
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller
+
+      - name: Run regression tests
+        shell: pwsh
+        working-directory: tools/chinh-sua-file-pdf-v1.4.0
+        run: |
+          $env:PYTHONPATH = "."
+          python -m unittest discover -s tests -p 'test_*.py' -v
+
+      - name: GUI regression file 62 to file 63 and responsive smoke
+        shell: pwsh
+        working-directory: tools/chinh-sua-file-pdf-v1.4.0
+        run: |
+          $env:PYTHONPATH = "."
+          python tests/gui_smoke.py
+
+      - name: Python bundled-logic self test
+        shell: pwsh
+        working-directory: tools/chinh-sua-file-pdf-v1.4.0
+        run: |
+          $env:PYTHONPATH = "."
+          python main.py --self-test
+
+      - name: Generate icon and Windows metadata
+        shell: pwsh
+        working-directory: tools/chinh-sua-file-pdf-v1.4.0
+        run: python build_assets.py
+
+      - name: Build single-file offline EXE
+        shell: pwsh
+        working-directory: tools/chinh-sua-file-pdf-v1.4.0
+        run: |
+          pyinstaller --noconfirm --clean --onefile --windowed `
+            --name "Chinh-Sua-File-PDF-v1.4.0" `
+            --icon "app.ico" `
+            --version-file "version_info.txt" `
+            --add-data "app.ico;." `
+            --collect-all pypdfium2 `
+            --hidden-import PIL._tkinter_finder `
+            main.py
+
+      - name: Self-test bundled EXE on Windows
+        shell: pwsh
+        working-directory: tools/chinh-sua-file-pdf-v1.4.0
+        run: |
+          $p = Start-Process -FilePath ".\dist\Chinh-Sua-File-PDF-v1.4.0.exe" -ArgumentList "--self-test" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "Bundled EXE self-test failed with exit code $($p.ExitCode)" }
+
+      - name: Prepare delivery package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path 'delivery-v140' | Out-Null
+          Copy-Item 'tools/chinh-sua-file-pdf-v1.4.0/dist/Chinh-Sua-File-PDF-v1.4.0.exe' 'delivery-v140/Chinh-Sua-File-PDF-v1.4.0.exe' -Force
+          Copy-Item 'Chinh-Sua-File-PDF-Source-v1.4.0.zip' 'delivery-v140/Chinh-Sua-File-PDF-Source-v1.4.0.zip' -Force
+          Copy-Item 'tools/chinh-sua-file-pdf-v1.4.0/app-icon-preview.png' 'delivery-v140/Chinh-Sua-File-PDF-v1.4.0-icon.png' -Force
+          $exeHash = (Get-FileHash 'delivery-v140/Chinh-Sua-File-PDF-v1.4.0.exe' -Algorithm SHA256).Hash.ToLower()
+          $srcHash = (Get-FileHash 'delivery-v140/Chinh-Sua-File-PDF-Source-v1.4.0.zip' -Algorithm SHA256).Hash.ToLower()
+          $report = @(
+            'Chỉnh sửa file PDF v1.4.0',
+            'Baseline: exact verified v1.3.0 source SHA256 2a3fe32a6f5e5a028e8385261d01d4d9710e3c7723191b2c1b2a691ffe84f010',
+            'Người thiết kế: Nguyễn Huy Toàn',
+            'Đơn vị: Văn phòng Đảng ủy xã Thanh Lâm',
+            'Điện thoại: 0979 928 450',
+            '',
+            'Fixed: đổi PDF luôn reset Trang 1 + thumbnail scroll + View scroll.',
+            'Changed: View mặc định 100%; quick zoom 100/125/150/200%.',
+            'Changed: LƯU & FILE TIẾP -> LƯU TẤT CẢ.',
+            'Changed: trạng thái Đã chỉnh sửa, chưa lưu / Đã lưu.',
+            'Changed: thu gọn header/toolbars để tăng chiều cao 3 cột.',
+            'Safety: Save All chỉ lưu dirty sessions; file lỗi không bị đánh dấu đã lưu; các file khác vẫn tiếp tục.',
+            'Preserved: đảo trang, xoay, kéo-thả, xóa, Undo/Redo, ghép/tách, restore, backup riêng, atomic save, cleanup backup.',
+            '',
+            'Tests: 18 unit regression tests + GUI regression/smoke + Python self-test + bundled Windows EXE self-test.',
+            "SHA256 EXE: $exeHash",
+            "SHA256 Source ZIP: $srcHash"
+          )
+          $report | Set-Content -Encoding UTF8 'delivery-v140/BUILD-TEST-REPORT-v1.4.0.txt'
+          "$exeHash  Chinh-Sua-File-PDF-v1.4.0.exe`n$srcHash  Chinh-Sua-File-PDF-Source-v1.4.0.zip" | Set-Content -Encoding ASCII 'delivery-v140/SHA256SUMS-v1.4.0.txt'
+
+      - name: Upload v1.4.0 Windows offline package
+        uses: actions/upload-artifact@v4
+        with:
+          name: Chinh-Sua-File-PDF-v1.4.0-Windows-Offline
+          path: delivery-v140/*
+          if-no-files-found: error
+          retention-days: 30
