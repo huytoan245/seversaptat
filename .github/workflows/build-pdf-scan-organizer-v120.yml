@@ -1,0 +1,99 @@
+name: Build PDF Scan Organizer v1.2.0 Windows Offline
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - artifact-pdf-scan-organizer-v1.2.0-20260830
+    paths-ignore:
+      - 'delivery/**'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout build branch
+        uses: actions/checkout@v4
+
+      - name: Reconstruct source directory
+        shell: pwsh
+        run: |
+          Remove-Item -Recurse -Force "tools\pdf-scan-organizer-v1.2.0" -ErrorAction SilentlyContinue
+          Expand-Archive -Path "tools\PDF-Scan-Organizer-Source-v1.2.0.zip" -DestinationPath "tools\pdf-scan-organizer-v1.2.0" -Force
+
+      - name: Setup Python 3.13 x64
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          architecture: 'x64'
+
+      - name: Install build dependencies
+        shell: pwsh
+        working-directory: tools/pdf-scan-organizer-v1.2.0
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller
+
+      - name: Run regression tests
+        shell: pwsh
+        working-directory: tools/pdf-scan-organizer-v1.2.0
+        run: |
+          $env:PYTHONPATH = "."
+          python -m unittest discover -s tests -v
+          python main.py --self-test
+
+      - name: Generate icon and Windows metadata
+        shell: pwsh
+        working-directory: tools/pdf-scan-organizer-v1.2.0
+        run: python build_assets.py
+
+      - name: Build single-file offline EXE
+        shell: pwsh
+        working-directory: tools/pdf-scan-organizer-v1.2.0
+        run: |
+          pyinstaller --noconfirm --clean --onefile --windowed `
+            --name "PDF-Scan-Organizer-v1.2.0" `
+            --icon "app.ico" `
+            --version-file "version_info.txt" `
+            --add-data "app.ico;." `
+            --collect-all pypdfium2 `
+            --hidden-import PIL._tkinter_finder `
+            main.py
+
+      - name: Self-test bundled EXE on Windows
+        shell: pwsh
+        working-directory: tools/pdf-scan-organizer-v1.2.0
+        run: |
+          & ".\dist\PDF-Scan-Organizer-v1.2.0.exe" --self-test
+          if ($LASTEXITCODE -ne 0) { throw "Bundled EXE self-test failed with exit code $LASTEXITCODE" }
+
+      - name: Prepare delivery files
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path "delivery" | Out-Null
+          Copy-Item "tools\pdf-scan-organizer-v1.2.0\dist\PDF-Scan-Organizer-v1.2.0.exe" "delivery\PDF-Scan-Organizer-v1.2.0.exe" -Force
+          Copy-Item "tools\PDF-Scan-Organizer-Source-v1.2.0.zip" "delivery\PDF-Scan-Organizer-Source-v1.2.0.zip" -Force
+          Copy-Item "tools\pdf-scan-organizer-v1.2.0\app-icon-preview.png" "delivery\PDF-Scan-Organizer-v1.2.0-icon.png" -Force
+          $hash = (Get-FileHash "delivery\PDF-Scan-Organizer-v1.2.0.exe" -Algorithm SHA256).Hash.ToLower()
+          @"
+PDF Scan Organizer v1.2.0
+Thiết kế: Nguyễn Huy Toàn
+Đơn vị: Văn phòng Đảng ủy xã Thanh Lâm
+Điện thoại: 0979 928 450
+Build: Windows x64 • PyInstaller one-file • offline runtime included
+Runtime network: không yêu cầu
+Tests: unittest regression + Python self-test + bundled EXE self-test
+SHA256 EXE: $hash
+"@ | Set-Content -Encoding UTF8 "delivery\BUILD-TEST-REPORT-v1.2.0.txt"
+
+      - name: Commit delivery to build branch
+        shell: pwsh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add delivery/PDF-Scan-Organizer-v1.2.0.exe delivery/PDF-Scan-Organizer-Source-v1.2.0.zip delivery/PDF-Scan-Organizer-v1.2.0-icon.png delivery/BUILD-TEST-REPORT-v1.2.0.txt
+          git commit -m "Build PDF Scan Organizer v1.2.0 Windows offline [skip ci]" || echo "Nothing to commit"
+          git push
