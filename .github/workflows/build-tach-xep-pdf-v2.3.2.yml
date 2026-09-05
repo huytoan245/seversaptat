@@ -35,8 +35,7 @@ jobs:
           $b64 = ((Get-ChildItem 'tach-xep-pdf-v2.3.2/build.parts/*.part' | Sort-Object Name | ForEach-Object { Get-Content $_.FullName -Raw }) -join '')
           [IO.File]::WriteAllBytes('tach-xep-pdf-v2.3.2/build_v232.ps1.gz', [Convert]::FromBase64String($b64))
           gzip -d -f 'tach-xep-pdf-v2.3.2/build_v232.ps1.gz'
-          $lines = Get-Content 'tach-xep-pdf-v2.3.2/build_v232.ps1'
-          for ($i = 155; $i -le [Math]::Min(205, $lines.Count); $i++) { Write-Host (('{0,4}: {1}' -f $i, $lines[$i-1])) }
+          python 'tach-xep-pdf-v2.3.2/patch_build_v232.py'
           & pwsh -NoProfile -ExecutionPolicy Bypass -File 'tach-xep-pdf-v2.3.2/build_v232.ps1'
           if ($LASTEXITCODE -ne 0) { throw "Build script failed: $LASTEXITCODE" }
 
