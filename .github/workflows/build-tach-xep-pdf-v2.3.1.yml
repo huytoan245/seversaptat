@@ -1,0 +1,197 @@
+name: build-tach-xep-pdf-v2.3.1
+
+on:
+  push:
+    branches:
+      - build/tach-xep-pdf-v2.3.1-20260905
+    paths:
+      - 'tach-xep-pdf-v2.3.1/**'
+      - '.github/workflows/build-tach-xep-pdf-v2.3.1.yml'
+
+permissions:
+  contents: read
+
+env:
+  PROJECT_DIR: tach-xep-pdf-v2.3.1
+  OUT_DIR: tach-xep-pdf-v2.3.1/publish
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Decode application source and icon
+        shell: pwsh
+        run: |
+          $srcB64 = ((Get-ChildItem "$env:PROJECT_DIR/source.parts/*.part" | Sort-Object Name | ForEach-Object { Get-Content $_.FullName -Raw }) -join "")
+          [IO.File]::WriteAllBytes("$env:PROJECT_DIR/TachXepTrangPDF.cs.gz", [Convert]::FromBase64String($srcB64))
+          gzip -d -f "$env:PROJECT_DIR/TachXepTrangPDF.cs.gz"
+          $iconB64 = ((Get-ChildItem "$env:PROJECT_DIR/icon.parts/*.part" | Sort-Object Name | ForEach-Object { Get-Content $_.FullName -Raw }) -join "")
+          [IO.File]::WriteAllBytes("$env:PROJECT_DIR/TachXepTrangPDF.ico", [Convert]::FromBase64String($iconB64))
+
+      - name: Install and copy offline orientation model
+        shell: pwsh
+        run: |
+          python -m pip install --disable-pip-version-check rapid-orientation
+          @'
+          from pathlib import Path
+          import shutil
+          import rapid_orientation
+          root = Path(rapid_orientation.__file__).resolve().parent
+          models = list(root.rglob('rapid_orientation.onnx'))
+          if not models:
+              raise SystemExit('rapid_orientation.onnx not found in installed package')
+          dst = Path('tach-xep-pdf-v2.3.1/rapid_orientation.onnx')
+          shutil.copy2(models[0], dst)
+          print('MODEL=', models[0])
+          print('SIZE=', dst.stat().st_size)
+          '@ | python -
+
+      - name: Regression logic test
+        shell: pwsh
+        run: python "$env:PROJECT_DIR/regression_test.py"
+
+      - name: Publish one-file self-contained Windows app
+        shell: pwsh
+        run: |
+          dotnet restore "$env:PROJECT_DIR/TachXepTrangPDF.csproj"
+          dotnet publish "$env:PROJECT_DIR/TachXepTrangPDF.csproj" `
+            -c Release -r win-x64 --self-contained true `
+            -p:PublishSingleFile=true `
+            -p:IncludeNativeLibrariesForSelfExtract=true `
+            -p:EnableCompressionInSingleFile=true `
+            -p:PublishTrimmed=false `
+            -o "$env:OUT_DIR"
+
+      - name: Download official RapidOrientation sample and generate 4 rotations
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force "$env:PROJECT_DIR/test-images" | Out-Null
+          Invoke-WebRequest -Uri "https://raw.githubusercontent.com/RapidAI/RapidOrientation/main/tests/test_files/img_rot0_demo.jpg" -OutFile "$env:PROJECT_DIR/test-images/rot0.jpg"
+          @'
+          import cv2
+          from pathlib import Path
+          from rapid_orientation import RapidOrientation
+          d=Path('tach-xep-pdf-v2.3.1/test-images')
+          base=cv2.imread(str(d/'rot0.jpg'))
+          if base is None: raise SystemExit('sample image not loaded')
+          imgs={
+              0: base,
+              90: cv2.rotate(base, cv2.ROTATE_90_CLOCKWISE),
+              180: cv2.rotate(base, cv2.ROTATE_180),
+              270: cv2.rotate(base, cv2.ROTATE_90_COUNTERCLOCKWISE),
+          }
+          engine=RapidOrientation()
+          for angle,img in imgs.items():
+              p=d/f'rot{angle}.jpg'
+              cv2.imwrite(str(p),img)
+              pred,_=engine(img)
+              print('angle',angle,'pred',pred)
+              if str(pred) != str(angle):
+                  raise SystemExit(f'RapidOrientation expected {angle}, got {pred}')
+          '@ | python -
+
+      - name: Smoke-test embedded .NET ONNX engine for all 4 orientations
+        shell: pwsh
+        run: |
+          $exe = Join-Path $env:OUT_DIR 'Tach_Xep_Trang_PDF_v2.3.1_PORTABLE.exe'
+          if (!(Test-Path $exe)) { throw "Published EXE not found: $exe" }
+          $tests = @(
+            @{img='rot0.jpg'; expected='0'},
+            @{img='rot90.jpg'; expected='270'},
+            @{img='rot180.jpg'; expected='180'},
+            @{img='rot270.jpg'; expected='90'}
+          )
+          foreach ($t in $tests) {
+            $img = Join-Path "$env:PROJECT_DIR/test-images" $t.img
+            $p = Start-Process -FilePath $exe -ArgumentList @('--orientation-test', $img, $t.expected) -PassThru -Wait
+            if ($p.ExitCode -ne 0) { throw "Orientation smoke test failed for $($t.img), exit $($p.ExitCode)" }
+          }
+
+      - name: Verify portable executable and create handoff report
+        shell: pwsh
+        run: |
+          $exe = Join-Path $env:OUT_DIR 'Tach_Xep_Trang_PDF_v2.3.1_PORTABLE.exe'
+          $model = Join-Path $env:PROJECT_DIR 'rapid_orientation.onnx'
+          $exeHash = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLower()
+          $modelHash = (Get-FileHash $model -Algorithm SHA256).Hash.ToLower()
+          $exeSize = (Get-Item $exe).Length
+          $modelSize = (Get-Item $model).Length
+          $report = @"
+          TÁCH & XẾP TRANG PDF v2.3.1 - BÁO CÁO BUILD / KIỂM THỬ
+
+          Nguyên nhân lỗi v2.3.0:
+          - Bản v2.3.0 biên dịch C# ngay trên máy người dùng và tham chiếu WinMetadata không đầy đủ.
+          - Trên máy thực tế xuất hiện CS0012 System.Attribute / System.Runtime trong Windows.Foundation.winmd.
+
+          Đã sửa v2.3.1:
+          - Bỏ hoàn toàn runtime C# compilation trên máy người dùng.
+          - Build sẵn .NET 8 self-contained win-x64 thành một EXE.
+          - Nhúng model rapid_orientation.onnx vào assembly; chạy offline bằng Microsoft.ML.OnnxRuntime CPU.
+          - Auto Rotate: AI 4 hướng + phân tích bố cục + consensus toàn tài liệu + cơ chế giữ nguyên khi không đủ confidence.
+          - Rotation không thay source_order.
+          - Focus trang: trả focus về ListView sau thao tác; ProcessCmdKey giữ phím Up/Down hoạt động sau khi bấm nút xoay.
+          - Hiển thị tên file đang xử lý.
+          - PerMonitorV2 DPI awareness.
+
+          Đã kiểm tra trên GitHub Windows runner:
+          - Python regression_test.py: PASS.
+          - dotnet restore/publish win-x64 self-contained single-file: PASS.
+          - RapidOrientation upstream sample 0/90/180/270: PASS.
+          - Chính EXE đã publish, model ONNX nhúng, self-test 0/90/180/270: PASS.
+
+          Chưa xác minh:
+          - Chưa thử trực tiếp trên máy Windows của người dùng và bộ PDF viết tay thực tế của người dùng.
+          - Không tuyên bố Auto Rotate đúng 100% với mọi tài liệu. Trang confidence thấp được giữ nguyên và đánh dấu CẦN KIỂM TRA.
+
+          EXE SHA-256: $exeHash
+          EXE size: $exeSize bytes
+          Model SHA-256: $modelHash
+          Model size: $modelSize bytes
+          "@
+          $report | Set-Content -Path "$env:PROJECT_DIR/BAO-CAO-BAN-GIAO-Tach-Xep-Trang-PDF-v2.3.1.txt" -Encoding UTF8
+
+      - name: Package source snapshot
+        shell: pwsh
+        run: |
+          $srcZip = "$env:PROJECT_DIR/Tach_Xep_Trang_PDF_v2.3.1_SOURCE.zip"
+          $items = @(
+            "$env:PROJECT_DIR/TachXepTrangPDF.cs",
+            "$env:PROJECT_DIR/TachXepTrangPDF.csproj",
+            "$env:PROJECT_DIR/app.manifest",
+            "$env:PROJECT_DIR/TachXepTrangPDF.ico",
+            "$env:PROJECT_DIR/rapid_orientation.onnx",
+            "$env:PROJECT_DIR/regression_test.py",
+            "$env:PROJECT_DIR/README-v2.3.1.txt",
+            "$env:PROJECT_DIR/THIRD-PARTY-NOTICES.txt"
+          )
+          Compress-Archive -Path $items -DestinationPath $srcZip -Force
+
+      - name: Collect release files
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force release | Out-Null
+          Copy-Item "$env:OUT_DIR/Tach_Xep_Trang_PDF_v2.3.1_PORTABLE.exe" release/
+          Copy-Item "$env:PROJECT_DIR/Tach_Xep_Trang_PDF_v2.3.1_SOURCE.zip" release/
+          Copy-Item "$env:PROJECT_DIR/BAO-CAO-BAN-GIAO-Tach-Xep-Trang-PDF-v2.3.1.txt" release/
+
+      - name: Upload release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Tach-Xep-Trang-PDF-v2.3.1-Release
+          path: release/*
+          if-no-files-found: error
+          retention-days: 30
