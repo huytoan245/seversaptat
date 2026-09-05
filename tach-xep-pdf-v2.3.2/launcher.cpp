@@ -168,6 +168,11 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
     {
         AppendLog(L"Launcher v2.3.2 start. Offline bootstrap; no network APIs used.");
         fs::path root = EnsurePayload();
+        int argc = 0;
+        LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
+        bool extractOnly = (argv != nullptr && argc >= 2 && std::wstring(argv[1]) == L"--extract-only");
+        if (argv) LocalFree(argv);
+        if (extractOnly) { AppendLog(L"Extract-only completed successfully."); return 0; }
         return (int)RunInner(root);
     }
     catch (const std::exception& ex)
