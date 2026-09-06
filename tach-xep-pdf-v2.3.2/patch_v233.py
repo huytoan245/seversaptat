@@ -50,10 +50,3 @@ launcher = launcher.replace('2.3.2', '2.3.3')
 launcher_path.write_text(launcher, encoding='utf-8-sig')
 
 print('PATCH_V233_STARTUP_RESIZE_SPLITTER_AND_UI_SMOKE_OK')
-# Temporary diagnostic output: ASCII-escaped BuildUi for exact responsive layout patching.
-start = s.find('        private void BuildUi()')
-end = s.find('        private Button MakeButton', start)
-if start >= 0 and end > start:
-    print('===== BUILDUI_ESCAPED_BEGIN =====')
-    print(s[start:end].encode('unicode_escape').decode('ascii'))
-    print('===== BUILDUI_ESCAPED_END =====')
