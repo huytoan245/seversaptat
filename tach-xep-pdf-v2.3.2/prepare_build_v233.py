@@ -8,14 +8,14 @@ s = s.replace('release-v2.3.2', 'release-v2.3.3')
 s = s.replace('v2.3.2', 'v2.3.3')
 s = s.replace('2.3.2', '2.3.3')
 
-# The workflow intentionally reuses the existing build folder; these two generated Python snippets
+# The workflow intentionally reuses the existing build folder; these generated Python snippets
 # must still address that physical folder.
 s = s.replace("tach-xep-pdf-v2.3.3/rapid_orientation.onnx", "tach-xep-pdf-v2.3.2/rapid_orientation.onnx")
 s = s.replace("tach-xep-pdf-v2.3.3/test-images", "tach-xep-pdf-v2.3.2/test-images")
 
-# Apply the v2.3.3 source patch immediately after the existing v2.3.2 reconstruction patch.
+# Apply the v2.3.3 source patch inside the existing try/finally block, immediately after patch_v232.
 needle = "try { & python (Join-Path $Project 'patch_v232.py'); if ($LASTEXITCODE -ne 0) { throw 'patch_v232.py failed' } }"
-replacement = needle + "\n    & python (Join-Path $Project 'patch_v233.py'); if ($LASTEXITCODE -ne 0) { throw 'patch_v233.py failed' }"
+replacement = "try { & python (Join-Path $Project 'patch_v232.py'); if ($LASTEXITCODE -ne 0) { throw 'patch_v232.py failed' }; & python (Join-Path $Project 'patch_v233.py'); if ($LASTEXITCODE -ne 0) { throw 'patch_v233.py failed' } }"
 if needle not in s:
     raise SystemExit('patch_v232 invocation not found')
 s = s.replace(needle, replacement, 1)
