@@ -12,14 +12,14 @@ s = s.replace('2.3.3', '2.3.4')
 s = s.replace('tach-xep-pdf-v2.3.4/rapid_orientation.onnx', 'tach-xep-pdf-v2.3.2/rapid_orientation.onnx')
 s = s.replace('tach-xep-pdf-v2.3.4/test-images', 'tach-xep-pdf-v2.3.2/test-images')
 
-# Run responsive UI patches after v2.3.3 startup patch.
-needle = "        & python (Join-Path $Project 'patch_v233.py'); if ($LASTEXITCODE -ne 0) { throw 'patch_v233.py failed' }"
-replacement = needle + "\n        & python (Join-Path $Project 'patch_v234.py'); if ($LASTEXITCODE -ne 0) { throw 'patch_v234.py failed' }\n        & python (Join-Path $Project 'patch_v234_verify.py'); if ($LASTEXITCODE -ne 0) { throw 'patch_v234_verify.py failed' }"
+# prepare_build_v233 keeps patch_v232 and patch_v233 inside one try block. Extend that exact block.
+needle = "try { & python (Join-Path $Project 'patch_v232.py'); if ($LASTEXITCODE -ne 0) { throw 'patch_v232.py failed' }; & python (Join-Path $Project 'patch_v233.py'); if ($LASTEXITCODE -ne 0) { throw 'patch_v233.py failed' } }"
+replacement = "try { & python (Join-Path $Project 'patch_v232.py'); if ($LASTEXITCODE -ne 0) { throw 'patch_v232.py failed' }; & python (Join-Path $Project 'patch_v233.py'); if ($LASTEXITCODE -ne 0) { throw 'patch_v233.py failed' }; & python (Join-Path $Project 'patch_v234.py'); if ($LASTEXITCODE -ne 0) { throw 'patch_v234.py failed' }; & python (Join-Path $Project 'patch_v234_verify.py'); if ($LASTEXITCODE -ne 0) { throw 'patch_v234_verify.py failed' } }"
 if needle not in s:
-    raise SystemExit('patch_v233 invocation not found')
+    raise SystemExit('combined patch_v232/patch_v233 invocation not found')
 s = s.replace(needle, replacement, 1)
 
-# Ensure the final portable still executes the real UI smoke test with firewall blocked.
+# Ensure final portable executes the real UI smoke test with outbound network blocked.
 old_ui = "$p = Start-Process -FilePath $portable -ArgumentList '--ui-smoke' -PassThru -Wait"
 if old_ui not in s:
     raise SystemExit('ui smoke process call not found')
