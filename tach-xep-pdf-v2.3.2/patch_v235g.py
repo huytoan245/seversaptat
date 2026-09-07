@@ -20,7 +20,7 @@ s = s.replace(old_set, new_set, 1)
 
 # Thumbnail errors used to be swallowed silently. Keep the UI tolerant but record diagnostics.
 old_thumb_catch = '''                    catch { }\n                }\n                BeginInvoke(new Action(delegate { if (_progress.Value >= _progress.Maximum) _progress.Value = 0; }));'''
-new_thumb_catch = '''                    catch (Exception ex) { AppDiagnostics.LogException("THUMBNAIL_RENDER_FAIL", ex); }\n                }\n                try { BeginInvoke(new Action(delegate { if (_progress.Value >= _progress.Maximum) _progress.Value = 0; })); }\n                catch (InvalidOperationException) { }\n                catch (ObjectDisposedException) { }'''
+new_thumb_catch = '''                    catch (Exception ex) { AppDiagnostics.LogException("THUMBNAIL_RENDER_FAIL", ex); }\n                }\n                try { BeginInvoke(new Action(delegate { if (_progress.Value >= _progress.Maximum) _progress.Value = 0; })); }\n                catch (InvalidOperationException) { }'''
 if old_thumb_catch not in s:
     raise SystemExit('thumbnail catch block not found')
 s = s.replace(old_thumb_catch, new_thumb_catch, 1)
