@@ -18,9 +18,17 @@ if needle not in s:
     raise SystemExit('v2.3.4 combined patch invocation not found')
 s = s.replace(needle, replacement, 1)
 
+# regression_test.py is restored from the immutable old source AFTER the source patch chain.
+# Patch the test expectation only after that copy so the release gate validates the new wording/features.
+reg_copy = "Copy-Item (Join-Path $Old 'regression_test.py') (Join-Path $Project 'regression_test.py') -Force"
+reg_call = reg_copy + "\n& python (Join-Path $Project 'patch_regression_v235.py')\nif ($LASTEXITCODE -ne 0) { throw 'patch_regression_v235.py failed' }"
+if reg_copy not in s:
+    raise SystemExit('regression_test copy marker not found')
+s = s.replace(reg_copy, reg_call, 1)
+
 # Include v2.3.5 patch chain in reproducible source snapshot.
 needle_files = "(Join-Path $Project 'patch_v234.py'), (Join-Path $Project 'patch_v234_verify.py'), (Join-Path $Project 'patch_v234_manual.py'), (Join-Path $Project 'prepare_build_v234.py'),"
-replace_files = "(Join-Path $Project 'patch_v234.py'), (Join-Path $Project 'patch_v234_verify.py'), (Join-Path $Project 'patch_v234_manual.py'), (Join-Path $Project 'prepare_build_v234.py'), (Join-Path $Project 'patch_v235a.py'), (Join-Path $Project 'patch_v235b.py'), (Join-Path $Project 'patch_v235c.py'), (Join-Path $Project 'patch_v235d.py'), (Join-Path $Project 'patch_v235e.py'), (Join-Path $Project 'prepare_build_v235.py'),"
+replace_files = "(Join-Path $Project 'patch_v234.py'), (Join-Path $Project 'patch_v234_verify.py'), (Join-Path $Project 'patch_v234_manual.py'), (Join-Path $Project 'prepare_build_v234.py'), (Join-Path $Project 'patch_v235a.py'), (Join-Path $Project 'patch_v235b.py'), (Join-Path $Project 'patch_v235c.py'), (Join-Path $Project 'patch_v235d.py'), (Join-Path $Project 'patch_v235e.py'), (Join-Path $Project 'patch_regression_v235.py'), (Join-Path $Project 'prepare_build_v235.py'),"
 if needle_files not in s:
     raise SystemExit('source snapshot v234 helper list not found')
 s = s.replace(needle_files, replace_files, 1)
