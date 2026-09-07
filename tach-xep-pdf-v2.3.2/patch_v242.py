@@ -45,6 +45,8 @@ s = s.replace(old, new, 1)
 
 # Update UI smoke expectations: old slider workflow is intentionally the required UI again.
 s = s.replace('"Vừa màn hình"', '"Vừa cửa sổ"')
+# v2.4.1 smoke explicitly required the preset buttons. They are intentionally removed in v2.4.2.
+s = s.replace('                            foreach(string ztxt in new string[]{"125%","150%","200%"}) AssertUiControlVisible(form, ztxt);\n', '')
 old = '''                            "Vừa cửa sổ",\n                            "125%",\n                            "150%",\n                            "200%",\n                            "Khôi phục PDF gốc"'''
 new = '''                            "Vừa cửa sổ",\n                            "Thu phóng:",\n                            "Khôi phục PDF gốc"'''
 if old in s:
@@ -54,8 +56,9 @@ if old in s:
 needle = '''                            Button fitButton = FindControlByText(form, "Vừa cửa sổ") as Button;'''
 if needle not in s:
     raise SystemExit('fit-button smoke marker missing')
-insert = '''                            TrackBar zoomSlider = FindControlByType<TrackBar>(form);\n                            if (zoomSlider == null || !zoomSlider.Visible || zoomSlider.Minimum > 90 || zoomSlider.Maximum < 150) throw new InvalidOperationException("Visible PDF preview zoom slider missing.");\n                            zoomSlider.Value = 90;\n                            if (zoomSlider.Value != 90) throw new InvalidOperationException("PDF preview zoom slider cannot select 90 percent.");\n'''
+insert = '''                            TrackBar zoomSlider = FindControlByType<TrackBar>(form);\n                            if (zoomSlider == null || !zoomSlider.Visible || zoomSlider.Minimum > 90 || zoomSlider.Maximum < 150) throw new InvalidOperationException("Visible PDF preview zoom slider missing.");\n                            zoomSlider.Value = 90;\n                            if (zoomSlider.Value != 90) throw new InvalidOperationException("PDF preview zoom slider cannot select 90 percent.");\n                            AssertUiControlVisible(form, "90%");\n'''
 s = s.replace(needle, insert + needle, 1)
+s = s.replace('''                            fitButton.PerformClick();\n''', '''                            fitButton.PerformClick();\n                            AssertUiControlVisible(form, "100%");\n''', 1)
 
 # Add a small generic type finder used only by UI smoke.
 marker = '''        private static Control FindControlByText(Control root, string text)\n'''
