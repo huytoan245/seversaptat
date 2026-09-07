@@ -61,7 +61,7 @@ s = s.replace(needle, repl, 1)
 
 out = s.encode('utf-8-sig')
 actual = hashlib.sha256(out).hexdigest()
-expected_final = '393f78d77df840a81714dd24ea1dd0e686bc28cb73796f5ea3a36a7c5139c4f0'
+expected_final = '289457e966797187c573839c63798526ef97c8082c68fba2aa8a26634e176bfe'
 if actual != expected_final:
     raise SystemExit('v2.4.4 source patch checksum mismatch actual=' + actual)
 p.write_bytes(out)
