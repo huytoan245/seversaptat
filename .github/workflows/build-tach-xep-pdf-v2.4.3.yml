@@ -83,18 +83,20 @@ jobs:
           if($src.Contains('inner.Panel2Collapsed = true')) { throw 'Manual-cut pane is still collapsed.' }
 
           $exe = Resolve-Path 'release-v2.4.3/Tach_Xep_Trang_PDF_v2.4.3_PORTABLE.exe'
-          function Invoke-Smoke([string]$arg, [int]$timeoutMs = 120000) {
-            Write-Host "RUN_SMOKE $arg"
-            $p = Start-Process -FilePath $exe -ArgumentList $arg -PassThru
-            if(-not $p.WaitForExit($timeoutMs)) { try { $p.Kill() } catch {}; throw "Smoke timed out: $arg" }
-            if($p.ExitCode -ne 0) {
-              Get-ChildItem "$env:LOCALAPPDATA/TachXepTrangPDF/Logs" -Filter '*.log' -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 3 | ForEach-Object { Write-Host "LOG=$($_.FullName)"; Get-Content $_.FullName }
-              throw "Smoke failed: $arg exit=$($p.ExitCode)"
-            }
-            Write-Host "SMOKE_PASS $arg"
+          Write-Host 'RUN_SMOKE --ui-smoke (includes RunWorkflowSmoke)'
+          $p = Start-Process -FilePath $exe -ArgumentList '--ui-smoke' -PassThru
+          if(-not $p.WaitForExit(180000)) { try { $p.Kill() } catch {}; throw 'UI/workflow smoke timed out.' }
+          if($p.ExitCode -ne 0) {
+            Get-ChildItem "$env:LOCALAPPDATA/TachXepTrangPDF/Logs" -Filter '*.log' -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 4 | ForEach-Object { Write-Host "LOG=$($_.FullName)"; Get-Content $_.FullName }
+            throw "UI/workflow smoke failed: exit=$($p.ExitCode)"
           }
-          Invoke-Smoke '--ui-smoke' 120000
-          Invoke-Smoke '--workflow-smoke' 180000
+
+          $logs = Get-ChildItem "$env:LOCALAPPDATA/TachXepTrangPDF/Logs" -Filter '*.log' -ErrorAction Stop | Sort-Object LastWriteTime -Descending
+          $logText = ($logs | Select-Object -First 4 | ForEach-Object { Get-Content $_.FullName -Raw }) -join "`n"
+          if($logText -notmatch 'WORKFLOW_SMOKE.*PASS') { throw 'RunWorkflowSmoke PASS marker not found in diagnostics.' }
+          if($logText -notmatch 'UI_SMOKE.*PASS') { throw 'UI_SMOKE PASS marker not found in diagnostics.' }
+          Write-Host 'UI_SMOKE=PASS'
+          Write-Host 'WORKFLOW_SMOKE=PASS'
 
           $exeHash = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()
           $verify = @(
