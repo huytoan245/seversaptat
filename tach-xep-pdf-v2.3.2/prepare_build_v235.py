@@ -12,6 +12,15 @@ s = s.replace('2.3.4', '2.3.5')
 s = s.replace('tach-xep-pdf-v2.3.5/rapid_orientation.onnx', 'tach-xep-pdf-v2.3.2/rapid_orientation.onnx')
 s = s.replace('tach-xep-pdf-v2.3.5/test-images', 'tach-xep-pdf-v2.3.2/test-images')
 
+# The release script has its own source marker gate in addition to regression_test.py.
+# Update that gate to the new filename wording and strengthen it for v2.3.5 UI invariants.
+s = s.replace("'File đang xử lý:'", "'File đang mở:'")
+old_required = "'TỰ CHIA & SẮP XẾP','File đang mở:')"
+new_required = "'TỰ CHIA & SẮP XẾP','File đang mở:','Vừa cửa sổ','PictureBoxSizeMode.Zoom','FitCanvas','SelectAdjacent','ConfigureRightPaneRatio')"
+if old_required not in s:
+    raise SystemExit('PowerShell regression required marker list not found')
+s = s.replace(old_required, new_required, 1)
+
 needle = "try { & python (Join-Path $Project 'patch_v232.py'); if ($LASTEXITCODE -ne 0) { throw 'patch_v232.py failed' }; & python (Join-Path $Project 'patch_v233.py'); if ($LASTEXITCODE -ne 0) { throw 'patch_v233.py failed' }; & python (Join-Path $Project 'patch_v234.py'); if ($LASTEXITCODE -ne 0) { throw 'patch_v234.py failed' }; & python (Join-Path $Project 'patch_v234_verify.py'); if ($LASTEXITCODE -ne 0) { throw 'patch_v234_verify.py failed' }; & python (Join-Path $Project 'patch_v234_manual.py'); if ($LASTEXITCODE -ne 0) { throw 'patch_v234_manual.py failed' } }"
 replacement = "try { & python (Join-Path $Project 'patch_v232.py'); if ($LASTEXITCODE -ne 0) { throw 'patch_v232.py failed' }; & python (Join-Path $Project 'patch_v233.py'); if ($LASTEXITCODE -ne 0) { throw 'patch_v233.py failed' }; & python (Join-Path $Project 'patch_v234.py'); if ($LASTEXITCODE -ne 0) { throw 'patch_v234.py failed' }; & python (Join-Path $Project 'patch_v234_verify.py'); if ($LASTEXITCODE -ne 0) { throw 'patch_v234_verify.py failed' }; & python (Join-Path $Project 'patch_v234_manual.py'); if ($LASTEXITCODE -ne 0) { throw 'patch_v234_manual.py failed' }; & python (Join-Path $Project 'patch_v235a.py'); if ($LASTEXITCODE -ne 0) { throw 'patch_v235a.py failed' }; & python (Join-Path $Project 'patch_v235b.py'); if ($LASTEXITCODE -ne 0) { throw 'patch_v235b.py failed' }; & python (Join-Path $Project 'patch_v235c.py'); if ($LASTEXITCODE -ne 0) { throw 'patch_v235c.py failed' }; & python (Join-Path $Project 'patch_v235d.py'); if ($LASTEXITCODE -ne 0) { throw 'patch_v235d.py failed' }; & python (Join-Path $Project 'patch_v235e.py'); if ($LASTEXITCODE -ne 0) { throw 'patch_v235e.py failed' } }"
 if needle not in s:
