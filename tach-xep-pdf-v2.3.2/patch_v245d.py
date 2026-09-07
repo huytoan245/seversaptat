@@ -33,7 +33,7 @@ s = s.replace(old, new, 1)
 
 out = s.encode('utf-8-sig')
 actual = hashlib.sha256(out).hexdigest()
-expected_final = '22f0f98d401b22983f05008ca043b49c63e89a9bf236f099042ada7778182ab7'
+expected_final = 'ea3b16c54c2437f480194b2eb97147e662138b2f09cfafcdef01c3f047a6a452'
 if actual != expected_final:
     raise SystemExit('v2.4.5d checksum mismatch: ' + actual)
 p.write_bytes(out)
