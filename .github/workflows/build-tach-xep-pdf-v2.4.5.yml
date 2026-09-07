@@ -1,0 +1,138 @@
+name: build-tach-xep-pdf-v2.4.5
+
+on:
+  push:
+    branches:
+      - build/tach-xep-pdf-v2.4.5-20260907
+    paths:
+      - 'tach-xep-pdf-v2.3.2/**'
+      - '.github/workflows/build-tach-xep-pdf-v2.4.5.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Reconstruct and build v2.4.5 real-page cache preview
+        shell: pwsh
+        run: |
+          $b64 = ((Get-ChildItem 'tach-xep-pdf-v2.3.2/build.parts/*.part' | Sort-Object Name | ForEach-Object { Get-Content $_.FullName -Raw }) -join '')
+          [IO.File]::WriteAllBytes('tach-xep-pdf-v2.3.2/build_v232.ps1.gz', [Convert]::FromBase64String($b64))
+          gzip -d -f 'tach-xep-pdf-v2.3.2/build_v232.ps1.gz'
+          python 'tach-xep-pdf-v2.3.2/patch_build_v232.py'
+          if ($LASTEXITCODE -ne 0) { throw "patch_build_v232.py failed: $LASTEXITCODE" }
+          python 'tach-xep-pdf-v2.3.2/prepare_build_v233.py'
+          if ($LASTEXITCODE -ne 0) { throw "prepare_build_v233.py failed: $LASTEXITCODE" }
+          python 'tach-xep-pdf-v2.3.2/prepare_build_v234.py'
+          if ($LASTEXITCODE -ne 0) { throw "prepare_build_v234.py failed: $LASTEXITCODE" }
+          python 'tach-xep-pdf-v2.3.2/prepare_build_v235.py'
+          if ($LASTEXITCODE -ne 0) { throw "prepare_build_v235.py failed: $LASTEXITCODE" }
+          python 'tach-xep-pdf-v2.3.2/prepare_build_v235f.py'
+          if ($LASTEXITCODE -ne 0) { throw "prepare_build_v235f.py failed: $LASTEXITCODE" }
+          python 'tach-xep-pdf-v2.3.2/prepare_build_v240.py'
+          if ($LASTEXITCODE -ne 0) { throw "prepare_build_v240.py failed: $LASTEXITCODE" }
+          python 'tach-xep-pdf-v2.3.2/prepare_build_v241.py'
+          if ($LASTEXITCODE -ne 0) { throw "prepare_build_v241.py failed: $LASTEXITCODE" }
+          python 'tach-xep-pdf-v2.3.2/prepare_build_v242.py'
+          if ($LASTEXITCODE -ne 0) { throw "prepare_build_v242.py failed: $LASTEXITCODE" }
+          python 'tach-xep-pdf-v2.3.2/prepare_build_v243.py'
+          if ($LASTEXITCODE -ne 0) { throw "prepare_build_v243.py failed: $LASTEXITCODE" }
+          python 'tach-xep-pdf-v2.3.2/prepare_build_v244.py'
+          if ($LASTEXITCODE -ne 0) { throw "prepare_build_v244.py failed: $LASTEXITCODE" }
+          python 'tach-xep-pdf-v2.3.2/prepare_build_v245.py'
+          if ($LASTEXITCODE -ne 0) { throw "prepare_build_v245.py failed: $LASTEXITCODE" }
+          & pwsh -NoProfile -ExecutionPolicy Bypass -File 'tach-xep-pdf-v2.3.2/build_v232.ps1'
+          if ($LASTEXITCODE -ne 0) { throw "Build script failed: $LASTEXITCODE" }
+
+      - name: Final cache-preview and protected-function smoke
+        shell: pwsh
+        run: |
+          $srcPath = 'tach-xep-pdf-v2.3.2/TachXepTrangPDF.cs'
+          $src = Get-Content $srcPath -Raw
+          $required = @(
+            'AppVersion = "2.4.5"',
+            'PreviewCacheCapacity = 7',
+            'PreviewCacheKey',
+            'TryGetCachedPreview',
+            'PutPreviewCache',
+            'SchedulePreviewPrefetch',
+            'PdfSession _prefetchPdf',
+            'one visual transition only',
+            'compactChrome',
+            'root.RowStyles[0].Height = topHeight',
+            'manualButtons.WrapContents = !compactChrome',
+            'TrackBar _zoom',
+            'CHỈNH ĐƯỜNG CẮT',
+            'ApplyManualCut',
+            'Lên 1',
+            'Xuống 1',
+            'Lên đầu',
+            'Xuống cuối',
+            '↶ Xoay trái 90°',
+            '↷ Xoay phải 90°',
+            'Xóa trang PDF',
+            'RunWorkflowSmoke'
+          )
+          foreach($m in $required) { if(-not $src.Contains($m)) { throw "Missing v2.4.5 protected marker: $m" } }
+          if($src.Contains('ShowImmediatePreviewFromThumbnail')) { throw 'Regression: tiny thumbnail preview path still exists.' }
+          if($src.Contains('Task.Delay(70, token)')) { throw 'Regression: obsolete 70ms thumbnail/HQ debounce still exists.' }
+          if($src.Contains('_cut.Enabled = !busy && !_isSplit')) { throw 'Manual cut regression: disabled after split.' }
+          if($src.Contains('inner.Panel2Collapsed = true')) { throw 'Manual cut pane regression: collapsed.' }
+
+          $exe = Resolve-Path 'release-v2.4.5/Tach_Xep_Trang_PDF_v2.4.5_PORTABLE.exe'
+          Write-Host 'RUN_SMOKE --ui-smoke (normal/maximized layout + page navigation + manual cut + zoom)'
+          $p = Start-Process -FilePath $exe -ArgumentList '--ui-smoke' -PassThru
+          if(-not $p.WaitForExit(180000)) { try { $p.Kill() } catch {}; throw 'UI/workflow smoke timed out.' }
+          if($p.ExitCode -ne 0) {
+            Get-ChildItem "$env:LOCALAPPDATA/TachXepTrangPDF/Logs" -Filter '*.log' -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 5 | ForEach-Object { Write-Host "LOG=$($_.FullName)"; Get-Content $_.FullName }
+            throw "UI/workflow smoke failed: exit=$($p.ExitCode)"
+          }
+          $logs = Get-ChildItem "$env:LOCALAPPDATA/TachXepTrangPDF/Logs" -Filter '*.log' -ErrorAction Stop | Sort-Object LastWriteTime -Descending
+          $logText = ($logs | Select-Object -First 5 | ForEach-Object { Get-Content $_.FullName -Raw }) -join "`n"
+          if($logText -notmatch 'WORKFLOW_SMOKE.*PASS') { throw 'WORKFLOW_SMOKE PASS marker missing.' }
+          if($logText -notmatch 'UI_SMOKE.*PASS') { throw 'UI_SMOKE PASS marker missing.' }
+          Write-Host 'UI_SMOKE=PASS'
+          Write-Host 'WORKFLOW_SMOKE=PASS'
+          Write-Host 'NO_TINY_THUMBNAIL_PREVIEW=PASS'
+          Write-Host 'COMPACT_TOP_CHROME=PASS'
+
+          $exeHash = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          $verify = @(
+            'TACH_XEP_TRANG_PDF_v2.4.5_FINAL_VERIFICATION',
+            'BUILD=PASS',
+            'SOURCE_CONTRACT=PASS',
+            'UI_SMOKE=PASS',
+            'WORKFLOW_SMOKE=PASS',
+            'NO_TINY_THUMBNAIL_PREVIEW=PASS',
+            'REAL_PAGE_CACHE_PREFETCH=PASS',
+            'COMPACT_TOP_CHROME=PASS',
+            'MANUAL_CUT_AFTER_SPLIT=PASS (covered by workflow smoke)',
+            'OFFLINE_FIRST_RUN_SELFTEST_AI=PASS (verified in build stage)',
+            "EXE_SHA256=$exeHash"
+          )
+          $verify | Set-Content 'release-v2.4.5/FINAL-VERIFICATION-v2.4.5.txt' -Encoding UTF8
+          Write-Host ($verify -join "`n")
+
+      - name: Upload release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Tach-Xep-Trang-PDF-v2.4.5-FINAL-RealPageCache-CompactUI-Offline-Release
+          path: release-v2.4.5/*
+          if-no-files-found: error
+          retention-days: 30
