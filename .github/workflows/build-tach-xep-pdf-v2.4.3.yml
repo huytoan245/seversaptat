@@ -56,10 +56,63 @@ jobs:
           & pwsh -NoProfile -ExecutionPolicy Bypass -File 'tach-xep-pdf-v2.3.2/build_v232.ps1'
           if ($LASTEXITCODE -ne 0) { throw "Build script failed: $LASTEXITCODE" }
 
+      - name: Final source contract and portable interaction smoke
+        shell: pwsh
+        run: |
+          $srcPath = 'tach-xep-pdf-v2.3.2/TachXepTrangPDF.cs'
+          $src = Get-Content $srcPath -Raw
+          $required = @(
+            'AppVersion = "2.4.3"',
+            'EnsureListSelectionVisible',
+            'ShowImmediatePreviewFromThumbnail',
+            'SemaphoreSlim _previewRenderGate',
+            'PdfSession _previewPdf',
+            'CHỈNH ĐƯỜNG CẮT',
+            'TrackBar _manualCutSlider',
+            'Áp dụng đường cắt',
+            'ApplyManualCut',
+            'GetSelectedSourceFace',
+            'Lên 1',
+            'Xuống 1',
+            'Lên đầu',
+            'Xuống cuối',
+            'RunWorkflowSmoke'
+          )
+          foreach($m in $required) { if(-not $src.Contains($m)) { throw "Missing protected interaction marker: $m" } }
+          if($src.Contains('_cut.Enabled = !busy && !_isSplit')) { throw 'Manual cut is still disabled after split.' }
+          if($src.Contains('inner.Panel2Collapsed = true')) { throw 'Manual-cut pane is still collapsed.' }
+
+          $exe = Resolve-Path 'release-v2.4.3/Tach_Xep_Trang_PDF_v2.4.3_PORTABLE.exe'
+          function Invoke-Smoke([string]$arg, [int]$timeoutMs = 120000) {
+            Write-Host "RUN_SMOKE $arg"
+            $p = Start-Process -FilePath $exe -ArgumentList $arg -PassThru
+            if(-not $p.WaitForExit($timeoutMs)) { try { $p.Kill() } catch {}; throw "Smoke timed out: $arg" }
+            if($p.ExitCode -ne 0) {
+              Get-ChildItem "$env:LOCALAPPDATA/TachXepTrangPDF/Logs" -Filter '*.log' -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 3 | ForEach-Object { Write-Host "LOG=$($_.FullName)"; Get-Content $_.FullName }
+              throw "Smoke failed: $arg exit=$($p.ExitCode)"
+            }
+            Write-Host "SMOKE_PASS $arg"
+          }
+          Invoke-Smoke '--ui-smoke' 120000
+          Invoke-Smoke '--workflow-smoke' 180000
+
+          $exeHash = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          $verify = @(
+            'TACH_XEP_TRANG_PDF_v2.4.3_FINAL_VERIFICATION',
+            'BUILD=PASS',
+            'SOURCE_CONTRACT=PASS',
+            'UI_SMOKE=PASS',
+            'WORKFLOW_SMOKE=PASS',
+            'OFFLINE_FIRST_RUN_SELFTEST_AI=PASS (verified in build stage)',
+            "EXE_SHA256=$exeHash"
+          )
+          $verify | Set-Content 'release-v2.4.3/FINAL-VERIFICATION-v2.4.3.txt' -Encoding UTF8
+          Write-Host ($verify -join "`n")
+
       - name: Upload release artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Tach-Xep-Trang-PDF-v2.4.3-Baseline-Interaction-Restoration-Offline-Release
+          name: Tach-Xep-Trang-PDF-v2.4.3-FINAL-Verified-Offline-Release
           path: release-v2.4.3/*
           if-no-files-found: error
           retention-days: 30
