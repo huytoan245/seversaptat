@@ -11,7 +11,7 @@ if old not in s: raise SystemExit('v240b invocation marker missing')
 s=s.replace(old,new,1)
 
 old="'PDF preview aspect ratio mismatch','.restore.rollback')"
-new="'PDF preview aspect ratio mismatch','.restore.rollback','Vừa màn hình','Rotated PDF preview was stretched','PATCH_V241_VISIBLE_ZOOM_ASPECT_SAFE_OK')"
+new="'PDF preview aspect ratio mismatch','.restore.rollback','Vừa màn hình','Rotated PDF preview was stretched')"
 if old not in s: raise SystemExit('required marker tail missing')
 s=s.replace(old,new,1)
 
