@@ -3,6 +3,7 @@ p=Path('tach-xep-pdf-v2.3.2/build_v232.ps1')
 s=p.read_text(encoding='utf-8-sig')
 
 s=s.replace('release-v2.4.0','release-v2.4.1').replace('v2.4.0','v2.4.1').replace('2.4.0','2.4.1')
+s=s.replace("'Vừa cửa sổ'", "'Vừa màn hình'")
 
 old="& python (Join-Path $Project 'patch_v240b.py'); if ($LASTEXITCODE -ne 0) { throw 'patch_v240b.py failed' } }"
 new="& python (Join-Path $Project 'patch_v240b.py'); if ($LASTEXITCODE -ne 0) { throw 'patch_v240b.py failed' }; & python (Join-Path $Project 'patch_v241.py'); if ($LASTEXITCODE -ne 0) { throw 'patch_v241.py failed' }; & python (Join-Path $Project 'patch_v241b.py'); if ($LASTEXITCODE -ne 0) { throw 'patch_v241b.py failed' }; & python (Join-Path $Project 'patch_v241c.py'); if ($LASTEXITCODE -ne 0) { throw 'patch_v241c.py failed' }; & python (Join-Path $Project 'patch_v241d.py'); if ($LASTEXITCODE -ne 0) { throw 'patch_v241d.py failed' } }"
