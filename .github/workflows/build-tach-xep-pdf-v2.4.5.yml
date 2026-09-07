@@ -60,6 +60,18 @@ jobs:
           & pwsh -NoProfile -ExecutionPolicy Bypass -File 'tach-xep-pdf-v2.3.2/build_v232.ps1'
           if ($LASTEXITCODE -ne 0) { throw "Build script failed: $LASTEXITCODE" }
 
+      - name: Upload reconstructed source for diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Tach-Xep-Trang-PDF-v2.4.5-Reconstructed-Source-Diagnostic
+          path: |
+            tach-xep-pdf-v2.3.2/TachXepTrangPDF.cs
+            tach-xep-pdf-v2.3.2/TachXepTrangPDF.csproj
+            tach-xep-pdf-v2.3.2/payload/Tach_Xep_Trang_PDF_v2.4.5.exe
+          if-no-files-found: warn
+          retention-days: 7
+
       - name: Final cache-preview and protected-function smoke
         shell: pwsh
         run: |
