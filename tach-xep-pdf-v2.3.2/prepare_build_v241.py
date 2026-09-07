@@ -5,7 +5,7 @@ s=p.read_text(encoding='utf-8-sig')
 s=s.replace('release-v2.4.0','release-v2.4.1').replace('v2.4.0','v2.4.1').replace('2.4.0','2.4.1')
 
 old="& python (Join-Path $Project 'patch_v240b.py'); if ($LASTEXITCODE -ne 0) { throw 'patch_v240b.py failed' } }"
-new="& python (Join-Path $Project 'patch_v240b.py'); if ($LASTEXITCODE -ne 0) { throw 'patch_v240b.py failed' }; & python (Join-Path $Project 'patch_v241.py'); if ($LASTEXITCODE -ne 0) { throw 'patch_v241.py failed' }; & python (Join-Path $Project 'patch_v241b.py'); if ($LASTEXITCODE -ne 0) { throw 'patch_v241b.py failed' }; & python (Join-Path $Project 'patch_v241c.py'); if ($LASTEXITCODE -ne 0) { throw 'patch_v241c.py failed' } }"
+new="& python (Join-Path $Project 'patch_v240b.py'); if ($LASTEXITCODE -ne 0) { throw 'patch_v240b.py failed' }; & python (Join-Path $Project 'patch_v241.py'); if ($LASTEXITCODE -ne 0) { throw 'patch_v241.py failed' }; & python (Join-Path $Project 'patch_v241b.py'); if ($LASTEXITCODE -ne 0) { throw 'patch_v241b.py failed' }; & python (Join-Path $Project 'patch_v241c.py'); if ($LASTEXITCODE -ne 0) { throw 'patch_v241c.py failed' }; & python (Join-Path $Project 'patch_v241d.py'); if ($LASTEXITCODE -ne 0) { throw 'patch_v241d.py failed' } }"
 if old not in s: raise SystemExit('v240b invocation marker missing')
 s=s.replace(old,new,1)
 
@@ -15,11 +15,10 @@ if old not in s: raise SystemExit('required marker tail missing')
 s=s.replace(old,new,1)
 
 old="(Join-Path $Project 'patch_v240b.py'), (Join-Path $Project 'prepare_build_v240.py'), (Join-Path $Project 'regression_test.py'),"
-new="(Join-Path $Project 'patch_v240b.py'), (Join-Path $Project 'patch_v241.py'), (Join-Path $Project 'patch_v241b.py'), (Join-Path $Project 'patch_v241c.py'), (Join-Path $Project 'prepare_build_v240.py'), (Join-Path $Project 'prepare_build_v241.py'), (Join-Path $Project 'regression_test.py'),"
+new="(Join-Path $Project 'patch_v240b.py'), (Join-Path $Project 'patch_v241.py'), (Join-Path $Project 'patch_v241b.py'), (Join-Path $Project 'patch_v241c.py'), (Join-Path $Project 'patch_v241d.py'), (Join-Path $Project 'prepare_build_v240.py'), (Join-Path $Project 'prepare_build_v241.py'), (Join-Path $Project 'regression_test.py'),"
 if old not in s: raise SystemExit('source list marker missing')
 s=s.replace(old,new,1)
 
-# Dump both canonical and any legacy startup log if UI smoke fails.
 old="""        $l2=Join-Path $env:LOCALAPPDATA 'TachXepTrangPDF\\Logs\\startup-v2.4.1.log'; if(Test-Path $l2){Get-Content $l2}\n        throw \"Firewall-blocked UI smoke test failed: $($p.ExitCode)\""""
 new="""        $l2=Join-Path $env:LOCALAPPDATA 'TachXepTrangPDF\\Logs\\startup-v2.4.1.log'; if(Test-Path $l2){Get-Content $l2}\n        Get-ChildItem (Join-Path $env:LOCALAPPDATA 'TachXepTrangPDF\\Logs\\startup-v*.log') -ErrorAction SilentlyContinue | ForEach-Object { Write-Host \"DIAG_LOG=$($_.FullName)\"; Get-Content $_.FullName }\n        $smoke=Join-Path $runtimeRoot 'ui-smoke-failure.txt'; if(Test-Path $smoke){Write-Host 'UI_SMOKE_FAILURE_FILE:'; Get-Content $smoke}\n        throw \"Firewall-blocked UI smoke test failed: $($p.ExitCode)\""""
 if old not in s: raise SystemExit('ui-smoke failure log marker missing')
