@@ -6,9 +6,9 @@ s = p.read_text(encoding='utf-8-sig')
 s = s.replace('release-v2.4.4', 'release-v2.4.5').replace('v2.4.4', 'v2.4.5').replace('2.4.4', '2.4.5')
 
 # Apply v2.4.5 after v2.4.4 source has been reconstructed, then harden the
-# compact cut pane and diagnostic version before compile/UI smoke.
+# compact cut pane and retain precise geometry diagnostics for any UI smoke failure.
 old = "& python (Join-Path $Project 'patch_v244.py'); if ($LASTEXITCODE -ne 0) { throw 'patch_v244.py failed' } }"
-new = "& python (Join-Path $Project 'patch_v244.py'); if ($LASTEXITCODE -ne 0) { throw 'patch_v244.py failed' }; & python (Join-Path $Project 'patch_v245.py'); if ($LASTEXITCODE -ne 0) { throw 'patch_v245.py failed' }; & python (Join-Path $Project 'patch_v245b.py'); if ($LASTEXITCODE -ne 0) { throw 'patch_v245b.py failed' } }"
+new = "& python (Join-Path $Project 'patch_v244.py'); if ($LASTEXITCODE -ne 0) { throw 'patch_v244.py failed' }; & python (Join-Path $Project 'patch_v245.py'); if ($LASTEXITCODE -ne 0) { throw 'patch_v245.py failed' }; & python (Join-Path $Project 'patch_v245b.py'); if ($LASTEXITCODE -ne 0) { throw 'patch_v245b.py failed' }; & python (Join-Path $Project 'patch_v245c.py'); if ($LASTEXITCODE -ne 0) { throw 'patch_v245c.py failed' } }"
 if old not in s:
     raise SystemExit('v2.4.4 patch-chain marker missing')
 s = s.replace(old, new, 1)
@@ -22,7 +22,7 @@ s = s.replace(old, new, 1)
 
 # Include the v2.4.5 patch/preparation in the source handoff snapshot.
 old = "(Join-Path $Project 'patch_v244.py'), (Join-Path $Project 'prepare_build_v244.py'), (Join-Path $Project 'regression_test.py'),"
-new = "(Join-Path $Project 'patch_v244.py'), (Join-Path $Project 'prepare_build_v244.py'), (Join-Path $Project 'patch_v245.py'), (Join-Path $Project 'patch_v245b.py'), (Join-Path $Project 'prepare_build_v245.py'), (Join-Path $Project 'regression_test.py'),"
+new = "(Join-Path $Project 'patch_v244.py'), (Join-Path $Project 'prepare_build_v244.py'), (Join-Path $Project 'patch_v245.py'), (Join-Path $Project 'patch_v245b.py'), (Join-Path $Project 'patch_v245c.py'), (Join-Path $Project 'prepare_build_v245.py'), (Join-Path $Project 'regression_test.py'),"
 if old not in s:
     raise SystemExit('v2.4.4 source snapshot marker missing')
 s = s.replace(old, new, 1)
