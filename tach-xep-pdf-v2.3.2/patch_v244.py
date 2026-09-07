@@ -70,7 +70,7 @@ if needle not in s:
 s = s.replace(needle, repl, 1)
 
 out = s.encode('utf-8-sig')
-expected_final = '8f612f9a2c25359e634eecea6888f3f8ac6fa842c4c4ced1d94c6dc97ba9bf8f'
+expected_final = '393f78d77df840a81714dd24ea1dd0e686bc28cb73796f5ea3a36a7c5139c4f0'
 if hashlib.sha256(out).hexdigest() != expected_final:
     raise SystemExit('v2.4.4 source patch checksum mismatch')
 p.write_bytes(out)
