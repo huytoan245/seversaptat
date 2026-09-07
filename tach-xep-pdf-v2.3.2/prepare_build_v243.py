@@ -20,10 +20,10 @@ s=s.replace(old,new,1)
 s=s.replace("'Panel2Collapsed = true',", "'PreviewZoomSlider','ManualCutSlider','Áp dụng đường cắt','ApplyManualCut','EnsureListSelectionVisible','ShowImmediatePreviewFromThumbnail','SemaphoreSlim _previewRenderGate','--workflow-smoke','RunWorkflowSmoke','Lên 1','Xuống 1','Lên đầu','Xuống cuối',")
 
 # Run an end-to-end interaction smoke through the final portable while outbound network is blocked.
-needle='''    $p = Start-Process -FilePath $portable -ArgumentList '--ui-smoke' -PassThru -Wait\n    if($p.ExitCode -ne 0)\n    {\n        $l2=Join-Path $env:LOCALAPPDATA 'TachXepTrangPDF\\Logs\\startup-v2.4.3.log'; if(Test-Path $l2){Get-Content $l2}\n        Get-ChildItem (Join-Path $env:LOCALAPPDATA 'TachXepTrangPDF\\Logs\\startup-v*.log') -ErrorAction SilentlyContinue | ForEach-Object { Write-Host \"DIAG_LOG=$($_.FullName)\"; Get-Content $_.FullName }\n        $smoke=Join-Path $runtimeRoot 'ui-smoke-failure.txt'; if(Test-Path $smoke){Write-Host 'UI_SMOKE_FAILURE_FILE:'; Get-Content $smoke}\n        throw \"Firewall-blocked UI smoke test failed: $($p.ExitCode)\"\n    }\n'''
-insert=needle+'''    $p = Start-Process -FilePath $portable -ArgumentList '--workflow-smoke' -PassThru -Wait\n    if($p.ExitCode -ne 0)\n    {\n        $l2=Join-Path $env:LOCALAPPDATA 'TachXepTrangPDF\\Logs\\startup-v2.4.3.log'; if(Test-Path $l2){Get-Content $l2}\n        throw \"Firewall-blocked workflow smoke test failed: $($p.ExitCode)\"\n    }\n'''
-if needle not in s: raise SystemExit('UI smoke execution marker missing')
-s=s.replace(needle,insert,1)
+anchor='''    foreach ($t in $tests) {\n'''
+workflow='''    $p = Start-Process -FilePath $portable -ArgumentList '--workflow-smoke' -PassThru -Wait\n    if($p.ExitCode -ne 0) {\n        $l1=Join-Path $env:LOCALAPPDATA 'TachXepTrangPDF\\Logs\\launcher-v2.4.3.log'; if(Test-Path $l1){Get-Content $l1}\n        $l2=Join-Path $env:LOCALAPPDATA 'TachXepTrangPDF\\Logs\\startup-v2.4.3.log'; if(Test-Path $l2){Get-Content $l2}\n        throw \"Firewall-blocked workflow smoke test failed: $($p.ExitCode)\"\n    }\n'''
+if anchor not in s: raise SystemExit('orientation-loop anchor missing')
+s=s.replace(anchor,workflow+anchor,1)
 
 s=s.replace("'OFFLINE_FIREWALL_UI_SMOKE=PASS' | Add-Content (Join-Path $Project 'offline-test.txt')", "'OFFLINE_FIREWALL_UI_SMOKE=PASS' | Add-Content (Join-Path $Project 'offline-test.txt')\n'OFFLINE_FIREWALL_WORKFLOW_SMOKE=PASS' | Add-Content (Join-Path $Project 'offline-test.txt')")
 
