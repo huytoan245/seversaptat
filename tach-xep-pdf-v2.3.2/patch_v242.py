@@ -65,4 +65,15 @@ if marker not in s:
 s = s.replace(marker, helper + marker, 1)
 
 p.write_text(s, encoding='utf-8-sig')
+
+# Portable launcher keeps its own runtime/cache version and inner-EXE name. Advance it together
+# with the managed app; otherwise extract-only succeeds into v2.4.1 while the build verifies v2.4.2.
+launcher = Path('tach-xep-pdf-v2.3.2/launcher.cpp')
+if launcher.exists():
+    ls = launcher.read_text(encoding='utf-8-sig')
+    ls2 = ls.replace('2.4.1', '2.4.2')
+    if ls2 == ls:
+        raise SystemExit('launcher 2.4.1 version marker missing')
+    launcher.write_text(ls2, encoding='utf-8-sig')
+
 print('PATCH_V242_RESTORE_PROVEN_PREVIEW_SLIDER_OK')
