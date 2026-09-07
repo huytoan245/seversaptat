@@ -9,13 +9,18 @@ new="& python (Join-Path $Project 'patch_v240b.py'); if ($LASTEXITCODE -ne 0) { 
 if old not in s: raise SystemExit('v240b invocation marker missing')
 s=s.replace(old,new,1)
 
+old="& python (Join-Path $Project 'patch_regression_v235.py')\nif ($LASTEXITCODE -ne 0) { throw 'patch_regression_v235.py failed' }"
+new="& python (Join-Path $Project 'patch_regression_v235.py')\nif ($LASTEXITCODE -ne 0) { throw 'patch_regression_v235.py failed' }\n& python (Join-Path $Project 'patch_regression_v241.py')\nif ($LASTEXITCODE -ne 0) { throw 'patch_regression_v241.py failed' }"
+if old not in s: raise SystemExit('regression patch marker missing')
+s=s.replace(old,new,1)
+
 old="'PDF preview aspect ratio mismatch','.restore.rollback')"
 new="'PDF preview aspect ratio mismatch','.restore.rollback','Vừa màn hình','Rotated PDF preview was stretched','startup-v2.4.1.log')"
 if old not in s: raise SystemExit('required marker tail missing')
 s=s.replace(old,new,1)
 
 old="(Join-Path $Project 'patch_v240b.py'), (Join-Path $Project 'prepare_build_v240.py'), (Join-Path $Project 'regression_test.py'),"
-new="(Join-Path $Project 'patch_v240b.py'), (Join-Path $Project 'patch_v241.py'), (Join-Path $Project 'patch_v241b.py'), (Join-Path $Project 'patch_v241c.py'), (Join-Path $Project 'patch_v241d.py'), (Join-Path $Project 'prepare_build_v240.py'), (Join-Path $Project 'prepare_build_v241.py'), (Join-Path $Project 'regression_test.py'),"
+new="(Join-Path $Project 'patch_v240b.py'), (Join-Path $Project 'patch_v241.py'), (Join-Path $Project 'patch_v241b.py'), (Join-Path $Project 'patch_v241c.py'), (Join-Path $Project 'patch_v241d.py'), (Join-Path $Project 'patch_regression_v241.py'), (Join-Path $Project 'prepare_build_v240.py'), (Join-Path $Project 'prepare_build_v241.py'), (Join-Path $Project 'regression_test.py'),"
 if old not in s: raise SystemExit('source list marker missing')
 s=s.replace(old,new,1)
 
