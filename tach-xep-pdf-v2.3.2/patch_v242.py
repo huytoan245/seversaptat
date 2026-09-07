@@ -23,7 +23,8 @@ s = s.replace(old, new, 1)
 
 # Replace the recent +/- + numeric + preset toolbar with the exact interaction pattern that worked well:
 # XEM TRƯỚC | Thu phóng: [slider] | n% | Vừa cửa sổ.
-start = '''            // v2.4.1: preview toolbar is a real layout row, always visible and never covered by Dock/BringToFront.\n            centerLayout.Padding = new Padding(0); centerLayout.RowStyles[0] = new RowStyle(SizeType.Absolute, 48); previewTop.Visible = true;'''
+# The version text in the source comment is already advanced above, hence v2.4.2 here.
+start = '''            // v2.4.2: preview toolbar is a real layout row, always visible and never covered by Dock/BringToFront.\n            centerLayout.Padding = new Padding(0); centerLayout.RowStyles[0] = new RowStyle(SizeType.Absolute, 48); previewTop.Visible = true;'''
 end = '''            _toolTip.SetToolTip(_btnFitStable, "Hiển thị trọn trang PDF trong vùng xem, giữ đúng tỷ lệ gốc. Đây là chế độ mặc định khi mở file.");'''
 si = s.find(start)
 if si < 0:
