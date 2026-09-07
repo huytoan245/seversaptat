@@ -13,6 +13,14 @@ if old not in s:
     raise SystemExit('v241d invocation marker missing')
 s = s.replace(old, new, 1)
 
+# Run v2.4.2 regression normalization AFTER v2.4.1 regression patch, because v2.4.1 intentionally
+# changed the old label away from "Vừa cửa sổ".
+old = "& python (Join-Path $Project 'patch_regression_v241.py')\nif ($LASTEXITCODE -ne 0) { throw 'patch_regression_v241.py failed' }"
+new = "& python (Join-Path $Project 'patch_regression_v241.py')\nif ($LASTEXITCODE -ne 0) { throw 'patch_regression_v241.py failed' }\n& python (Join-Path $Project 'patch_regression_v242.py')\nif ($LASTEXITCODE -ne 0) { throw 'patch_regression_v242.py failed' }"
+if old not in s:
+    raise SystemExit('v241 regression invocation marker missing')
+s = s.replace(old, new, 1)
+
 # The old slider workflow is now the required regression contract again.
 s = s.replace("'Vừa màn hình'", "'Vừa cửa sổ'")
 old = "'PDF preview aspect ratio mismatch','.restore.rollback','Vừa cửa sổ','Rotated PDF preview was stretched','startup-v2.4.2.log')"
@@ -23,7 +31,7 @@ s = s.replace(old, new, 1)
 
 # Include v2.4.2 patch/build scripts in source handoff.
 old = "(Join-Path $Project 'patch_v241d.py'), (Join-Path $Project 'patch_regression_v241.py'), (Join-Path $Project 'prepare_build_v240.py'), (Join-Path $Project 'prepare_build_v241.py'), (Join-Path $Project 'regression_test.py'),"
-new = "(Join-Path $Project 'patch_v241d.py'), (Join-Path $Project 'patch_v242.py'), (Join-Path $Project 'patch_regression_v241.py'), (Join-Path $Project 'prepare_build_v240.py'), (Join-Path $Project 'prepare_build_v241.py'), (Join-Path $Project 'prepare_build_v242.py'), (Join-Path $Project 'regression_test.py'),"
+new = "(Join-Path $Project 'patch_v241d.py'), (Join-Path $Project 'patch_v242.py'), (Join-Path $Project 'patch_regression_v241.py'), (Join-Path $Project 'patch_regression_v242.py'), (Join-Path $Project 'prepare_build_v240.py'), (Join-Path $Project 'prepare_build_v241.py'), (Join-Path $Project 'prepare_build_v242.py'), (Join-Path $Project 'regression_test.py'),"
 if old not in s:
     raise SystemExit('source snapshot marker missing')
 s = s.replace(old, new, 1)
