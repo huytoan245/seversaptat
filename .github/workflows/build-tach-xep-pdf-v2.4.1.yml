@@ -1,0 +1,61 @@
+name: build-tach-xep-pdf-v2.4.1
+
+on:
+  push:
+    branches:
+      - build/tach-xep-pdf-v2.4.1-20260907
+    paths:
+      - 'tach-xep-pdf-v2.3.2/**'
+      - '.github/workflows/build-tach-xep-pdf-v2.4.1.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Reconstruct and build v2.4.1 visible zoom / aspect-safe preview release
+        shell: pwsh
+        run: |
+          $b64 = ((Get-ChildItem 'tach-xep-pdf-v2.3.2/build.parts/*.part' | Sort-Object Name | ForEach-Object { Get-Content $_.FullName -Raw }) -join '')
+          [IO.File]::WriteAllBytes('tach-xep-pdf-v2.3.2/build_v232.ps1.gz', [Convert]::FromBase64String($b64))
+          gzip -d -f 'tach-xep-pdf-v2.3.2/build_v232.ps1.gz'
+          python 'tach-xep-pdf-v2.3.2/patch_build_v232.py'
+          if ($LASTEXITCODE -ne 0) { throw "patch_build_v232.py failed: $LASTEXITCODE" }
+          python 'tach-xep-pdf-v2.3.2/prepare_build_v233.py'
+          if ($LASTEXITCODE -ne 0) { throw "prepare_build_v233.py failed: $LASTEXITCODE" }
+          python 'tach-xep-pdf-v2.3.2/prepare_build_v234.py'
+          if ($LASTEXITCODE -ne 0) { throw "prepare_build_v234.py failed: $LASTEXITCODE" }
+          python 'tach-xep-pdf-v2.3.2/prepare_build_v235.py'
+          if ($LASTEXITCODE -ne 0) { throw "prepare_build_v235.py failed: $LASTEXITCODE" }
+          python 'tach-xep-pdf-v2.3.2/prepare_build_v235f.py'
+          if ($LASTEXITCODE -ne 0) { throw "prepare_build_v235f.py failed: $LASTEXITCODE" }
+          python 'tach-xep-pdf-v2.3.2/prepare_build_v240.py'
+          if ($LASTEXITCODE -ne 0) { throw "prepare_build_v240.py failed: $LASTEXITCODE" }
+          python 'tach-xep-pdf-v2.3.2/prepare_build_v241.py'
+          if ($LASTEXITCODE -ne 0) { throw "prepare_build_v241.py failed: $LASTEXITCODE" }
+          & pwsh -NoProfile -ExecutionPolicy Bypass -File 'tach-xep-pdf-v2.3.2/build_v232.ps1'
+          if ($LASTEXITCODE -ne 0) { throw "Build script failed: $LASTEXITCODE" }
+
+      - name: Upload release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Tach-Xep-Trang-PDF-v2.4.1-VisibleZoom-AspectSafe-True-Offline-Release
+          path: release-v2.4.1/*
+          if-no-files-found: error
+          retention-days: 30
