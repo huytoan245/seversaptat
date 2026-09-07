@@ -23,6 +23,9 @@ s = s.replace(old, new, 1)
 
 # The old slider workflow is now the required regression contract again.
 s = s.replace("'Vừa màn hình'", "'Vừa cửa sổ'")
+# v2.4.1 source audit required the three preset buttons. They are intentionally removed in v2.4.2.
+for obsolete in ("'125%',", "'150%',", "'200%',"):
+    s = s.replace(obsolete, '')
 old = "'PDF preview aspect ratio mismatch','.restore.rollback','Vừa cửa sổ','Rotated PDF preview was stretched','startup-v2.4.2.log')"
 new = "'PDF preview aspect ratio mismatch','.restore.rollback','Vừa cửa sổ','Thu phóng:','TrackBar _zoom','Visible PDF preview zoom slider missing','Rotated PDF preview was stretched','startup-v2.4.2.log')"
 if old not in s:
