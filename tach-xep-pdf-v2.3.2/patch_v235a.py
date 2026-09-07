@@ -3,6 +3,7 @@ p = Path('tach-xep-pdf-v2.3.2/TachXepTrangPDF.cs')
 s = p.read_text(encoding='utf-8-sig')
 
 s = s.replace('private const string AppVersion = "2.3.4";', 'private const string AppVersion = "2.3.5";', 1)
+s = s.replace('2.3.4', '2.3.5')
 s = s.replace('        private TrackBar _zoom;\n', '        private NumericUpDown _zoom;\n', 1)
 
 # Header: keep title/author only; file name moves directly above Open PDF.
