@@ -1,0 +1,1 @@
+v2.4.1 visible zoom, aspect-safe PDF preview, modern UI branch seed
