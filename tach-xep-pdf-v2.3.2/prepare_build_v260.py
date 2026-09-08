@@ -1,4 +1,11 @@
 from pathlib import Path
+import subprocess
+import sys
+
+# Normalize the v2.6 patch itself before it is called by the reconstructed build script.
+# This keeps the completion hook tolerant of the established ExportPdfAsync parameter name.
+fixer = Path('tach-xep-pdf-v2.3.2/fix_patch_v260_export_signature.py')
+subprocess.run([sys.executable, str(fixer)], check=True)
 
 p = Path('tach-xep-pdf-v2.3.2/build_v232.ps1')
 s = p.read_text(encoding='utf-8-sig')
@@ -20,7 +27,8 @@ if old_marker not in s:
     raise SystemExit('v2.5.0 multi-file regression marker missing')
 s = s.replace(old_marker, new_marker, 1)
 
-# Include v2.6.0 patch/preparation in source handoff.
+# Include v2.6.0 patch/preparation in source handoff. patch_v260.py has already been normalized
+# in this build workspace, so the handed-off patch is directly reusable without the fixer.
 old_snapshot = "(Join-Path $Project 'patch_v250.py'), (Join-Path $Project 'patch_v250b.py'), (Join-Path $Project 'prepare_build_v250.py'), (Join-Path $Project 'regression_test.py'),"
 new_snapshot = "(Join-Path $Project 'patch_v250.py'), (Join-Path $Project 'patch_v250b.py'), (Join-Path $Project 'prepare_build_v250.py'), (Join-Path $Project 'patch_v260.py'), (Join-Path $Project 'prepare_build_v260.py'), (Join-Path $Project 'regression_test.py'),"
 if old_snapshot not in s:
