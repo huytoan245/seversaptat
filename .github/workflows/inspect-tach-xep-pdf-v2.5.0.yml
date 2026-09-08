@@ -43,6 +43,9 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "reconstruction/build failed: $LASTEXITCODE" }
       - name: Dump architecture snippets
         shell: pwsh
+        env:
+          PYTHONIOENCODING: utf-8
+          PYTHONUTF8: '1'
         run: |
           @'
           from pathlib import Path
@@ -55,15 +58,15 @@ jobs:
           for pat in patterns:
               hits=[i for i,l in enumerate(lines) if pat in l]
               if not hits: continue
-              for i in hits[:3]:
-                  if any(abs(i-j)<35 for j in printed): continue
+              for i in hits[:4]:
+                  if any(abs(i-j)<30 for j in printed): continue
                   printed.append(i)
-                  a=max(0,i-25); b=min(len(lines),i+70)
+                  a=max(0,i-30); b=min(len(lines),i+90)
                   print('\n===== PATTERN',pat,'LINE',i+1,'=====')
                   for n in range(a,b): print(f'{n+1:05d}: {lines[n]}')
           print('\n===== FIELD LINES =====')
           for i,l in enumerate(lines):
-              if any(x in l for x in ['PdfSession _','string _source','string _work','List<','Stack<','ListView _','TrackBar _zoom','SplitContainer']):
+              if any(x in l for x in ['PdfSession _','string _source','string _work','List<','Stack<','ListView _','TrackBar _zoom','SplitContainer','Button _btn','RadioButton _mode','NumericUpDown _cut']):
                   print(f'{i+1:05d}: {l}')
           '@ | Set-Content dump_source.py -Encoding UTF8
           python dump_source.py
