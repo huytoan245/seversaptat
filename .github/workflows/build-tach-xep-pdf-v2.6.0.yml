@@ -125,8 +125,9 @@ jobs:
           if($src.Contains('actions.WrapContents = false')) { throw 'DPI regression: top actions reverted to fixed no-wrap.' }
           if($src.Contains('directionInline.Size = new Size(300, 38)')) { throw 'DPI regression: cut direction reverted to fixed text width.' }
 
-          $exportStart = $src.IndexOf('private async Task ExportPdfAsync(bool saveToOriginal)')
-          if($exportStart -lt 0) { throw 'ExportPdfAsync method not found.' }
+          $exportMatch = [regex]::Match($src, 'private\s+async\s+Task\s+ExportPdfAsync\s*\(\s*bool\s+saveToOriginal[^)]*\)')
+          if(-not $exportMatch.Success) { throw 'ExportPdfAsync method not found.' }
+          $exportStart = $exportMatch.Index
           $exportSlice = $src.Substring($exportStart, [Math]::Min(16000, $src.Length - $exportStart))
           if($exportSlice -notmatch 'MarkActiveDocumentCompleted\(\)') { throw 'Completed status is not tied to successful export path.' }
           if($src -notmatch 'PushHistory\(\)[\s\S]{0,180}MarkActiveDocumentInProgress\(\)') { throw 'Edit-after-completion status reset is not protected.' }
