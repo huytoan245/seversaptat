@@ -2,10 +2,13 @@ from pathlib import Path
 import subprocess
 import sys
 
-# Normalize the v2.6 patch itself before it is called by the reconstructed build script.
-# These two small preparation steps make the patch tolerant of the established export signature
-# and provide a MainForm-local control finder for the new responsive navigation layout.
-for fixer_name in ['fix_patch_v260_export_signature.py', 'fix_patch_v260_findcontrol.py']:
+# Normalize the v2.6 patch before it is called by the reconstructed build script.
+# These are build-time normalizations only; the handed-off patch_v260.py is already normalized.
+for fixer_name in [
+    'fix_patch_v260_export_signature.py',
+    'fix_patch_v260_findcontrol.py',
+    'fix_patch_v260_column_smoke.py',
+]:
     fixer = Path('tach-xep-pdf-v2.3.2') / fixer_name
     subprocess.run([sys.executable, str(fixer)], check=True)
 
