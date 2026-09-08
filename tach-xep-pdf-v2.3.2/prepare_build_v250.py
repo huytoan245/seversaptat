@@ -5,7 +5,7 @@ s = p.read_text(encoding='utf-8-sig')
 
 # Chain v2.5.0 after the fully reconstructed and regression-proven v2.4.5 source.
 old = "& python (Join-Path $Project 'patch_v245e.py'); if ($LASTEXITCODE -ne 0) { throw 'patch_v245e.py failed' } }"
-new = "& python (Join-Path $Project 'patch_v245e.py'); if ($LASTEXITCODE -ne 0) { throw 'patch_v245e.py failed' }; & python (Join-Path $Project 'patch_v250.py'); if ($LASTEXITCODE -ne 0) { throw 'patch_v250.py failed' } }"
+new = "& python (Join-Path $Project 'patch_v245e.py'); if ($LASTEXITCODE -ne 0) { throw 'patch_v245e.py failed' }; & python (Join-Path $Project 'patch_v250.py'); if ($LASTEXITCODE -ne 0) { throw 'patch_v250.py failed' }; & python (Join-Path $Project 'patch_v250b.py'); if ($LASTEXITCODE -ne 0) { throw 'patch_v250b.py failed' } }"
 if old not in s:
     raise SystemExit('v2.4.5 final patch-chain marker missing')
 s = s.replace(old, new, 1)
@@ -23,7 +23,7 @@ s = s.replace(old_marker, new_marker, 1)
 
 # Include v2.5.0 patch and preparation files in the source handoff ZIP.
 old_snapshot = "(Join-Path $Project 'patch_v245e.py'), (Join-Path $Project 'prepare_build_v245.py'), (Join-Path $Project 'regression_test.py'),"
-new_snapshot = "(Join-Path $Project 'patch_v245e.py'), (Join-Path $Project 'prepare_build_v245.py'), (Join-Path $Project 'patch_v250.py'), (Join-Path $Project 'prepare_build_v250.py'), (Join-Path $Project 'regression_test.py'),"
+new_snapshot = "(Join-Path $Project 'patch_v245e.py'), (Join-Path $Project 'prepare_build_v245.py'), (Join-Path $Project 'patch_v250.py'), (Join-Path $Project 'patch_v250b.py'), (Join-Path $Project 'prepare_build_v250.py'), (Join-Path $Project 'regression_test.py'),"
 if old_snapshot not in s:
     raise SystemExit('v2.4.5 source snapshot marker missing')
 s = s.replace(old_snapshot, new_snapshot, 1)
