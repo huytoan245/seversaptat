@@ -1,0 +1,69 @@
+name: inspect-tach-xep-pdf-v2.5.0
+
+on:
+  push:
+    branches:
+      - inspect/tach-xep-pdf-v2.5.0-20260908d
+    paths:
+      - '.github/workflows/inspect-tach-xep-pdf-v2.5.0.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Reconstruct current v2.4.5 source
+        shell: pwsh
+        run: |
+          $b64 = ((Get-ChildItem 'tach-xep-pdf-v2.3.2/build.parts/*.part' | Sort-Object Name | ForEach-Object { Get-Content $_.FullName -Raw }) -join '')
+          [IO.File]::WriteAllBytes('tach-xep-pdf-v2.3.2/build_v232.ps1.gz', [Convert]::FromBase64String($b64))
+          gzip -d -f 'tach-xep-pdf-v2.3.2/build_v232.ps1.gz'
+          python 'tach-xep-pdf-v2.3.2/patch_build_v232.py'
+          python 'tach-xep-pdf-v2.3.2/prepare_build_v233.py'
+          python 'tach-xep-pdf-v2.3.2/prepare_build_v234.py'
+          python 'tach-xep-pdf-v2.3.2/prepare_build_v235.py'
+          python 'tach-xep-pdf-v2.3.2/prepare_build_v235f.py'
+          python 'tach-xep-pdf-v2.3.2/prepare_build_v240.py'
+          python 'tach-xep-pdf-v2.3.2/prepare_build_v241.py'
+          python 'tach-xep-pdf-v2.3.2/prepare_build_v242.py'
+          python 'tach-xep-pdf-v2.3.2/prepare_build_v243.py'
+          python 'tach-xep-pdf-v2.3.2/prepare_build_v244.py'
+          python 'tach-xep-pdf-v2.3.2/prepare_build_v245.py'
+          & pwsh -NoProfile -ExecutionPolicy Bypass -File 'tach-xep-pdf-v2.3.2/build_v232.ps1'
+          if ($LASTEXITCODE -ne 0) { throw "reconstruction/build failed: $LASTEXITCODE" }
+      - name: Dump architecture snippets
+        shell: pwsh
+        run: |
+          @'
+          from pathlib import Path
+          p=Path('tach-xep-pdf-v2.3.2/TachXepTrangPDF.cs')
+          lines=p.read_text(encoding='utf-8-sig').splitlines()
+          patterns=[
+            'class MainForm','MainForm()','OpenFileDialog','_sourcePath','_workPath','RefreshList','RefreshSource','LoadPdf','OpenPdf','SplitContainer','ListView _','ListBox _','FlowLayoutPanel','RestoreOriginalPdf','SaveToOriginal','SetBusy','Cleanup','_outputs','_sources','_rotation','RunWorkflowSmoke'
+          ]
+          printed=[]
+          for pat in patterns:
+              hits=[i for i,l in enumerate(lines) if pat in l]
+              if not hits: continue
+              for i in hits[:3]:
+                  if any(abs(i-j)<35 for j in printed): continue
+                  printed.append(i)
+                  a=max(0,i-25); b=min(len(lines),i+70)
+                  print('\n===== PATTERN',pat,'LINE',i+1,'=====')
+                  for n in range(a,b): print(f'{n+1:05d}: {lines[n]}')
+          print('\n===== FIELD LINES =====')
+          for i,l in enumerate(lines):
+              if any(x in l for x in ['PdfSession _','string _source','string _work','List<','Stack<','ListView _','TrackBar _zoom','SplitContainer']):
+                  print(f'{i+1:05d}: {l}')
+          '@ | Set-Content dump_source.py -Encoding UTF8
+          python dump_source.py
