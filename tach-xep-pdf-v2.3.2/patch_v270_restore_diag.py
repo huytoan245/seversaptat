@@ -6,6 +6,6 @@ end=s.find('        private void PushHistory()\n', start)
 if start < 0 or end < 0:
     raise SystemExit('RestoreOriginalPdf boundary missing')
 print('---RESTORE_METHOD_BEGIN---')
-print(s[start:end])
+print(s[start:end].encode('unicode_escape').decode('ascii'))
 print('---RESTORE_METHOD_END---')
 print('PATCH_V270_RESTORE_DIAG_OK')
