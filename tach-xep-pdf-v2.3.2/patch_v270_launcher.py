@@ -12,10 +12,9 @@ for marker in required:
 p.write_text(s,encoding='utf-8-sig')
 print('PATCH_V270_LAUNCHER_IDENTITY_OK')
 
-# The production app remains unchanged here; this patch only hardens the UI smoke harness.
-# Execute the bounded message-pump patch at the end of the existing v2.7.0 chain so async
-# UI continuations are exercised on the WinForms thread without Application.DoEvents() hangs.
-smoke_patch=root/'patch_v270_smoke_pump.py'
+# Harden only the test harness: run feature smoke inside a real WinForms message loop and
+# await merge/extract operations naturally. Production merge/preview/export code is unchanged.
+smoke_patch=root/'patch_v270_async_smoke.py'
 if not smoke_patch.exists():
-    raise SystemExit('v2.7.0 bounded smoke pump patch missing')
+    raise SystemExit('v2.7.0 async UI smoke patch missing')
 exec(compile(smoke_patch.read_text(encoding='utf-8-sig'),str(smoke_patch),'exec'),{})
