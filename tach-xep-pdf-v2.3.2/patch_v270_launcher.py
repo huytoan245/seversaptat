@@ -12,6 +12,12 @@ for marker in required:
 p.write_text(s,encoding='utf-8-sig')
 print('PATCH_V270_LAUNCHER_IDENTITY_OK')
 
+# Keep the literal 4-8 smoke requirement, but run it on a fixture that has >= 8 pages.
+range_patch=root/'patch_v270_range_smoke_fixture.py'
+if not range_patch.exists():
+    raise SystemExit('v2.7.0 range smoke fixture patch missing')
+exec(compile(range_patch.read_text(encoding='utf-8-sig'),str(range_patch),'exec'),{})
+
 # Harden only the test harness: run feature smoke inside a real WinForms message loop and
 # await merge/extract operations naturally. Production merge/preview/export code is unchanged.
 smoke_patch=root/'patch_v270_async_smoke.py'
