@@ -57,6 +57,16 @@ jobs:
             Get-ChildItem "$env:LOCALAPPDATA/TachXepTrangPDF/Logs" -Filter '*.log' -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 20 | ForEach-Object { Write-Host "--- LOG=$($_.FullName) ---"; Get-Content $_.FullName }
             throw "Build script failed: $($bp.ExitCode)"
           }
+      - name: Upload generated source diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Tach-Xep-Trang-PDF-v2.7.0-Generated-Source-Diagnostics
+          path: |
+            tach-xep-pdf-v2.3.2/TachXepTrangPDF.cs
+            tach-xep-pdf-v2.3.2/TachXepTrangPDF.csproj
+          if-no-files-found: warn
+          retention-days: 7
       - name: Protected source contract and regression smoke
         shell: pwsh
         run: |
