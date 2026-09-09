@@ -14,7 +14,7 @@ permissions:
 jobs:
   build:
     runs-on: windows-latest
-    timeout-minutes: 60
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -38,8 +38,25 @@ jobs:
             python (Join-Path 'tach-xep-pdf-v2.3.2' $prep)
             if ($LASTEXITCODE -ne 0) { throw "$prep failed: $LASTEXITCODE" }
           }
-          & pwsh -NoProfile -ExecutionPolicy Bypass -File 'tach-xep-pdf-v2.3.2/build_v232.ps1'
-          if ($LASTEXITCODE -ne 0) { throw "Build script failed: $LASTEXITCODE" }
+          $buildScript = (Resolve-Path 'tach-xep-pdf-v2.3.2/build_v232.ps1').Path
+          $stdout = Join-Path $env:RUNNER_TEMP 'v270-build-stdout.log'
+          $stderr = Join-Path $env:RUNNER_TEMP 'v270-build-stderr.log'
+          $bp = Start-Process -FilePath 'pwsh' -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File',$buildScript) -PassThru -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+          if(-not $bp.WaitForExit(480000)) {
+            try { $bp.Kill($true) } catch {}
+            Write-Host 'BUILD_STAGE_WATCHDOG_TIMEOUT=480s'
+            if(Test-Path $stdout) { Write-Host '--- BUILD STDOUT ---'; Get-Content $stdout }
+            if(Test-Path $stderr) { Write-Host '--- BUILD STDERR ---'; Get-Content $stderr }
+            Get-ChildItem "$env:LOCALAPPDATA/TachXepTrangPDF/Logs" -Filter '*.log' -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 20 | ForEach-Object { Write-Host "--- LOG=$($_.FullName) ---"; Get-Content $_.FullName }
+            throw 'Build stage timed out after 8 minutes.'
+          }
+          $bp.Refresh()
+          if(Test-Path $stdout) { Get-Content $stdout }
+          if(Test-Path $stderr) { Get-Content $stderr }
+          if ($bp.ExitCode -ne 0) {
+            Get-ChildItem "$env:LOCALAPPDATA/TachXepTrangPDF/Logs" -Filter '*.log' -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 20 | ForEach-Object { Write-Host "--- LOG=$($_.FullName) ---"; Get-Content $_.FullName }
+            throw "Build script failed: $($bp.ExitCode)"
+          }
       - name: Protected source contract and regression smoke
         shell: pwsh
         run: |
@@ -77,13 +94,13 @@ jobs:
           $exe = Resolve-Path 'release-v2.7.0/Tach_Xep_Trang_PDF_v2.7.0_PORTABLE.exe'
           Write-Host 'RUN_SMOKE --ui-smoke'
           $p = Start-Process -FilePath $exe -ArgumentList '--ui-smoke' -PassThru
-          if(-not $p.WaitForExit(300000)) { try { $p.Kill() } catch {}; throw 'UI/workflow smoke timed out.' }
+          if(-not $p.WaitForExit(180000)) { try { $p.Kill($true) } catch {}; Get-ChildItem "$env:LOCALAPPDATA/TachXepTrangPDF/Logs" -Filter '*.log' -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 20 | ForEach-Object { Write-Host "LOG=$($_.FullName)"; Get-Content $_.FullName }; throw 'UI/workflow smoke timed out.' }
           if($p.ExitCode -ne 0) {
-            Get-ChildItem "$env:LOCALAPPDATA/TachXepTrangPDF/Logs" -Filter '*.log' -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 15 | ForEach-Object { Write-Host "LOG=$($_.FullName)"; Get-Content $_.FullName }
+            Get-ChildItem "$env:LOCALAPPDATA/TachXepTrangPDF/Logs" -Filter '*.log' -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 20 | ForEach-Object { Write-Host "LOG=$($_.FullName)"; Get-Content $_.FullName }
             throw "UI/workflow smoke failed: exit=$($p.ExitCode)"
           }
           $logs = Get-ChildItem "$env:LOCALAPPDATA/TachXepTrangPDF/Logs" -Filter '*.log' -ErrorAction Stop | Sort-Object LastWriteTime -Descending
-          $logText = ($logs | Select-Object -First 15 | ForEach-Object { Get-Content $_.FullName -Raw }) -join "`n"
+          $logText = ($logs | Select-Object -First 20 | ForEach-Object { Get-Content $_.FullName -Raw }) -join "`n"
           if($logText -notmatch 'WORKFLOW_SMOKE.*PASS') { throw 'WORKFLOW_SMOKE PASS marker missing.' }
           if($logText -notmatch 'UI_SMOKE.*PASS') { throw 'UI_SMOKE PASS marker missing.' }
           $exeHash = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()
