@@ -4,7 +4,7 @@ p = Path('tach-xep-pdf-v2.3.2/build_v232.ps1')
 s = p.read_text(encoding='utf-8-sig')
 
 old = "& python (Join-Path $Project 'patch_v260.py'); if ($LASTEXITCODE -ne 0) { throw 'patch_v260.py failed' }; & python (Join-Path $Project 'patch_v261.py'); if ($LASTEXITCODE -ne 0) { throw 'patch_v261.py failed' }; & python (Join-Path $Project 'patch_v261_identity.py'); if ($LASTEXITCODE -ne 0) { throw 'patch_v261_identity.py failed' }; & python (Join-Path $Project 'patch_v261_scroll_extent.py'); if ($LASTEXITCODE -ne 0) { throw 'patch_v261_scroll_extent.py failed' } }"
-chain = ['patch_v270_model.py','patch_v270_ui.py','patch_v270_list.py','patch_v270_merge_extract.py','patch_v270_tests.py']
+chain = ['patch_v270_model.py','patch_v270_ui.py','patch_v270_list.py','patch_v270_merge_extract.py','patch_v270_tests.py','patch_v270_restore_diag.py']
 extra = ''.join("; & python (Join-Path $Project '%s'); if ($LASTEXITCODE -ne 0) { throw '%s failed' }" % (name,name) for name in chain)
 new = old[:-2] + extra + ' }'
 if old not in s:
@@ -28,7 +28,7 @@ if old_req not in s:
 s = s.replace(old_req, new_req, 1)
 
 old_snapshot = "(Join-Path $Project 'patch_v260.py'), (Join-Path $Project 'prepare_build_v260.py'), (Join-Path $Project 'patch_v261.py'), (Join-Path $Project 'patch_v261_identity.py'), (Join-Path $Project 'patch_v261_scroll_extent.py'), (Join-Path $Project 'prepare_build_v261.py'), (Join-Path $Project 'regression_test.py'),"
-new_snapshot = "(Join-Path $Project 'patch_v260.py'), (Join-Path $Project 'prepare_build_v260.py'), (Join-Path $Project 'patch_v261.py'), (Join-Path $Project 'patch_v261_identity.py'), (Join-Path $Project 'patch_v261_scroll_extent.py'), (Join-Path $Project 'prepare_build_v261.py'), (Join-Path $Project 'patch_v270_model.py'), (Join-Path $Project 'patch_v270_ui.py'), (Join-Path $Project 'patch_v270_list.py'), (Join-Path $Project 'patch_v270_merge_extract.py'), (Join-Path $Project 'patch_v270_tests.py'), (Join-Path $Project 'prepare_build_v270.py'), (Join-Path $Project 'regression_test.py'),"
+new_snapshot = "(Join-Path $Project 'patch_v260.py'), (Join-Path $Project 'prepare_build_v260.py'), (Join-Path $Project 'patch_v261.py'), (Join-Path $Project 'patch_v261_identity.py'), (Join-Path $Project 'patch_v261_scroll_extent.py'), (Join-Path $Project 'prepare_build_v261.py'), (Join-Path $Project 'patch_v270_model.py'), (Join-Path $Project 'patch_v270_ui.py'), (Join-Path $Project 'patch_v270_list.py'), (Join-Path $Project 'patch_v270_merge_extract.py'), (Join-Path $Project 'patch_v270_tests.py'), (Join-Path $Project 'patch_v270_restore_diag.py'), (Join-Path $Project 'prepare_build_v270.py'), (Join-Path $Project 'regression_test.py'),"
 if old_snapshot not in s:
     raise SystemExit('v2.6.1 source snapshot marker missing')
 s = s.replace(old_snapshot, new_snapshot, 1)
