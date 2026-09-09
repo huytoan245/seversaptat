@@ -75,7 +75,7 @@ jobs:
           $required = @(
             'AppVersion = "2.7.0"','UiTheme','Segoe UI Variable Text','FluentButton','PageRangeDialog','PdfPageComposer','OriginalWorkPath','original-at-open.pdf','ImportedFullPage',
             'PrepareDocumentListForOpen','RemoveDocumentWorkspace','RemoveSelectedFileFromList','ClearAllDocumentsFromButton','MergePdfIntoCurrentAsync','MergePdfFilesCoreAsync',
-            'ExtractSelectedPageAsync','ExtractRangeWithDialogAsync','ExtractPagesToPathAsync','Ghép thêm PDF','Tách trang...','Tách riêng trang đang chọn','Tách nhiều trang','Xóa tệp','Xóa tất cả',
+            'ExtractSelectedPageAsync','ExtractRangeWithDialogAsync','ExtractPagesToPathAsync','Ghép thêm PDF','Tách trang từ tệp này...','Tách riêng trang đang chọn','Tách nhiều trang','Xóa tệp','Xóa tất cả',
             'Xoay trái 90°','Xoay phải 90°','Xoay 180°','ConfigureRightPaneRatio(inner, 0.115, 172, 210)','ClampRightPaneForResize(inner, 168, 390)',
             'SmoothPreviewPanel','PreviewPanMouseDown','PreviewPanMouseMove','SetPreviewPanPosition','CanPanPreview','PreviewCacheCapacity = 7','SchedulePreviewPrefetch','atomic preview swap',
             'DocumentWorkspace','DocumentProcessingState','ApplyManualCut','RunWorkflowSmoke','merge before split did not append two source pages','single-page extraction count mismatch',
