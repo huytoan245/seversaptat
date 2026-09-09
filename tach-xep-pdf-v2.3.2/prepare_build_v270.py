@@ -4,7 +4,7 @@ p = Path('tach-xep-pdf-v2.3.2/build_v232.ps1')
 s = p.read_text(encoding='utf-8-sig')
 
 old = "& python (Join-Path $Project 'patch_v260.py'); if ($LASTEXITCODE -ne 0) { throw 'patch_v260.py failed' }; & python (Join-Path $Project 'patch_v261.py'); if ($LASTEXITCODE -ne 0) { throw 'patch_v261.py failed' }; & python (Join-Path $Project 'patch_v261_identity.py'); if ($LASTEXITCODE -ne 0) { throw 'patch_v261_identity.py failed' }; & python (Join-Path $Project 'patch_v261_scroll_extent.py'); if ($LASTEXITCODE -ne 0) { throw 'patch_v261_scroll_extent.py failed' } }"
-chain = ['patch_v270_model.py','patch_v270_ui.py','patch_v270_compact_top.py','patch_v270_list.py','patch_v270_merge_extract.py','patch_v270_merge_safety.py','patch_v270_merge_trace.py','patch_v270_merge_finalize.py','patch_v270_fullpage_render.py','patch_v270_tests.py','patch_v270_preview_smoke.py','patch_v270_async_smoke.py','patch_v270_restore_safe.py','patch_v270_launcher.py']
+chain = ['patch_v270_model.py','patch_v270_ui.py','patch_v270_compact_top.py','patch_v270_list.py','patch_v270_merge_extract.py','patch_v270_merge_safety.py','patch_v270_merge_trace.py','patch_v270_merge_finalize.py','patch_v270_fullpage_render.py','patch_v270_tests.py','patch_v270_range_smoke_fixture.py','patch_v270_preview_smoke.py','patch_v270_async_smoke.py','patch_v270_restore_safe.py','patch_v270_launcher.py']
 extra = ''.join("; & python (Join-Path $Project '%s'); if ($LASTEXITCODE -ne 0) { throw '%s failed' }" % (name,name) for name in chain)
 new = old[:-2] + extra + ' }'
 if old not in s:
@@ -26,7 +26,7 @@ if old_req not in s:
 s = s.replace(old_req, new_req, 1)
 
 old_snapshot = "(Join-Path $Project 'patch_v260.py'), (Join-Path $Project 'prepare_build_v260.py'), (Join-Path $Project 'patch_v261.py'), (Join-Path $Project 'patch_v261_identity.py'), (Join-Path $Project 'patch_v261_scroll_extent.py'), (Join-Path $Project 'prepare_build_v261.py'), (Join-Path $Project 'regression_test.py'),"
-new_snapshot = "(Join-Path $Project 'patch_v260.py'), (Join-Path $Project 'prepare_build_v260.py'), (Join-Path $Project 'patch_v261.py'), (Join-Path $Project 'patch_v261_identity.py'), (Join-Path $Project 'patch_v261_scroll_extent.py'), (Join-Path $Project 'prepare_build_v261.py'), (Join-Path $Project 'patch_v270_model.py'), (Join-Path $Project 'patch_v270_ui.py'), (Join-Path $Project 'patch_v270_compact_top.py'), (Join-Path $Project 'patch_v270_list.py'), (Join-Path $Project 'patch_v270_merge_extract.py'), (Join-Path $Project 'patch_v270_merge_safety.py'), (Join-Path $Project 'patch_v270_merge_trace.py'), (Join-Path $Project 'patch_v270_merge_finalize.py'), (Join-Path $Project 'patch_v270_fullpage_render.py'), (Join-Path $Project 'patch_v270_tests.py'), (Join-Path $Project 'patch_v270_preview_smoke.py'), (Join-Path $Project 'patch_v270_async_smoke.py'), (Join-Path $Project 'patch_v270_restore_safe.py'), (Join-Path $Project 'patch_v270_launcher.py'), (Join-Path $Project 'prepare_build_v270.py'), (Join-Path $Project 'regression_test.py'),"
+new_snapshot = "(Join-Path $Project 'patch_v260.py'), (Join-Path $Project 'prepare_build_v260.py'), (Join-Path $Project 'patch_v261.py'), (Join-Path $Project 'patch_v261_identity.py'), (Join-Path $Project 'patch_v261_scroll_extent.py'), (Join-Path $Project 'prepare_build_v261.py'), (Join-Path $Project 'patch_v270_model.py'), (Join-Path $Project 'patch_v270_ui.py'), (Join-Path $Project 'patch_v270_compact_top.py'), (Join-Path $Project 'patch_v270_list.py'), (Join-Path $Project 'patch_v270_merge_extract.py'), (Join-Path $Project 'patch_v270_merge_safety.py'), (Join-Path $Project 'patch_v270_merge_trace.py'), (Join-Path $Project 'patch_v270_merge_finalize.py'), (Join-Path $Project 'patch_v270_fullpage_render.py'), (Join-Path $Project 'patch_v270_tests.py'), (Join-Path $Project 'patch_v270_range_smoke_fixture.py'), (Join-Path $Project 'patch_v270_preview_smoke.py'), (Join-Path $Project 'patch_v270_async_smoke.py'), (Join-Path $Project 'patch_v270_restore_safe.py'), (Join-Path $Project 'patch_v270_launcher.py'), (Join-Path $Project 'prepare_build_v270.py'), (Join-Path $Project 'regression_test.py'),"
 if old_snapshot not in s:
     raise SystemExit('v2.6.1 source snapshot marker missing')
 s = s.replace(old_snapshot, new_snapshot, 1)
@@ -40,6 +40,7 @@ if marker in s:
         '\n- Sau ghép giữ focus tại trang vừa chèn; không queue focus cũ lần hai trong finally.'
         '\n- Trang ghép sau khi đã cắt luôn Thumbnail/Preview/Xuất nguyên trang, không đi qua CropHalf.'
         '\n- Workflow smoke mới chạy async/await trên message loop WinForms thật, không còn DoEvents lồng để chờ task.'
+        '\n- Test tách dải 4-8 chạy trên fixture đã có ít nhất 8 trang, tránh false negative do fixture 7 trang.'
         '\n- Prefetch được cô lập như tối ưu nền; race session/list không được phép làm hỏng Preview chính.'
         '\n- Ghép ở bản gốc rồi bấm Lưu vào file gốc sẽ ghi đúng kết quả hiện tại vào PDF nguồn, sau khi đã tạo bản gốc bất biến an toàn.'
         '\n- Khôi phục PDF gốc dùng original-at-open bất biến và replace rollback-safe cho cả file nguồn lẫn work-copy.'
