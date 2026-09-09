@@ -1,8 +1,8 @@
 from pathlib import Path
 import re
 root=Path('tach-xep-pdf-v2.3.2')
-p=root/'TachXepTrangPDF.cs'; csproj=root/'TachXepTrangPDF.csproj'
-s=p.read_text(encoding='utf-8-sig'); cs=csproj.read_text(encoding='utf-8-sig')
+p=root/'TachXepTrangPDF.cs'
+s=p.read_text(encoding='utf-8-sig')
 
 def rep(old,new,label):
     global s
@@ -12,12 +12,6 @@ def rep(old,new,label):
 rep('private const string AppVersion = "2.6.1";','private const string AppVersion = "2.7.0";','version')
 if 'using PdfSharp.Pdf.IO;' not in s:
     rep('using Windows.Storage.Streams;\n','using Windows.Storage.Streams;\nusing PdfSharp.Pdf.IO;\n','pdfsharp using')
-if 'PackageReference Include="PDFsharp"' not in cs:
-    old='    <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.22.1" />\n'
-    if old not in cs: raise SystemExit('v270 model csproj onnx marker missing')
-    cs=cs.replace(old,old+'    <PackageReference Include="PDFsharp" Version="6.2.4" />\n',1)
-cs=cs.replace('<AssemblyName>Tach_Xep_Trang_PDF_v2.6.0</AssemblyName>','<AssemblyName>Tach_Xep_Trang_PDF_v2.7.0</AssemblyName>')
-
 rep('        internal bool NeedsReview;\n        internal string ReviewReason = "";\n\n        internal SourceFace Clone()',
     '        internal bool NeedsReview;\n        internal string ReviewReason = "";\n        internal bool ImportedFullPage;\n\n        internal SourceFace Clone()','SourceFace flag')
 rep('            x.ReviewReason = ReviewReason;\n            return x;\n        }\n    }\n\n    internal sealed class OutputPage',
@@ -144,5 +138,5 @@ s=s.replace('internal const string Version = "2.6.1";','internal const string Ve
 s=s.replace('startup-v2.6.1.log','startup-v2.7.0.log')
 s=s.replace('_sourcePath = ""; _workPath = ""; _sessionDir = ""; _sourceWasOverwritten = false;', '_sourcePath = ""; _workPath = ""; _originalWorkPath = ""; _sessionDir = ""; _sourceWasOverwritten = false;')
 
-p.write_text(s,encoding='utf-8-sig'); csproj.write_text(cs,encoding='utf-8-sig')
+p.write_text(s,encoding='utf-8-sig')
 print('PATCH_V270_MODEL_OK')
