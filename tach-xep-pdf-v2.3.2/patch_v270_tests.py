@@ -17,19 +17,19 @@ smoke=r'''                // v2.7.0 feature regression: both merge modes, both e
                 if(_isSplit || _sources.Count!=originalSecondCount+2 || _pdf.PageCount!=originalSecondCount+2) throw new InvalidOperationException("Workflow smoke: merge before split did not append two source pages.");
                 if(!_sources.Take(originalSecondCount).Select(delegate(SourceFace x){return x.OriginalSourceIndex;}).SequenceEqual(originalSecondOrder)) throw new InvalidOperationException("Workflow smoke: merge changed existing source order/identity.");
                 if(_sources.Skip(originalSecondCount).Any(delegate(SourceFace x){return x.ImportedFullPage;})) throw new InvalidOperationException("Workflow smoke: pre-split merge incorrectly marked pages as full-page imports.");
-                using(PdfSession sourceBeforeSave=new PdfSession(pdfPath2)) if(sourceBeforeSave.PageCount!=originalSecondCount) throw new InvalidOperationException("Workflow smoke: merge modified source PDF before Save original.");
+                PdfSession sourceBeforeSave=new PdfSession(pdfPath2); if(sourceBeforeSave.PageCount!=originalSecondCount) throw new InvalidOperationException("Workflow smoke: merge modified source PDF before Save original."); sourceBeforeSave=null;
                 string mergedModelExport=Path.Combine(dir,"workflow-smoke-merged-model-export.pdf"); List<int> mergedIndexes=Enumerable.Range(0,_sources.Count).ToList();
                 Task mergedExportTask=ExtractPagesToPathAsync(mergedIndexes,mergedModelExport); while(!mergedExportTask.IsCompleted){Application.DoEvents();Thread.Sleep(10);} mergedExportTask.GetAwaiter().GetResult();
-                using(PdfSession mergedExportPdf=new PdfSession(mergedModelExport)) if(mergedExportPdf.PageCount!=originalSecondCount+2) throw new InvalidOperationException("Workflow smoke: current merged model would not export all pages for Save original.");
+                PdfSession mergedExportPdf=new PdfSession(mergedModelExport); if(mergedExportPdf.PageCount!=originalSecondCount+2) throw new InvalidOperationException("Workflow smoke: current merged model would not export all pages for Save original."); mergedExportPdf=null;
 
                 string extractSingle=Path.Combine(dir,"workflow-smoke-extract-single.pdf"); int modelCountBeforeExtract=_sources.Count, undoBeforeExtract=_undo.Count, redoBeforeExtract=_redo.Count;
                 Task extractOneTask=ExtractPagesToPathAsync(new List<int>{2},extractSingle); while(!extractOneTask.IsCompleted){Application.DoEvents();Thread.Sleep(10);} extractOneTask.GetAwaiter().GetResult();
-                using(PdfSession extractOnePdf=new PdfSession(extractSingle)) if(extractOnePdf.PageCount!=1) throw new InvalidOperationException("Workflow smoke: single-page extraction count mismatch.");
+                PdfSession extractOnePdf=new PdfSession(extractSingle); if(extractOnePdf.PageCount!=1) throw new InvalidOperationException("Workflow smoke: single-page extraction count mismatch."); extractOnePdf=null;
                 if(_sources.Count!=modelCountBeforeExtract || _undo.Count!=undoBeforeExtract || _redo.Count!=redoBeforeExtract) throw new InvalidOperationException("Workflow smoke: single extraction mutated active document.");
 
                 string extractRange=Path.Combine(dir,"workflow-smoke-extract-range.pdf"); List<int> inclusiveIndexes=new List<int>{3,4,5,6,7};
                 Task extractRangeTask=ExtractPagesToPathAsync(inclusiveIndexes,extractRange); while(!extractRangeTask.IsCompleted){Application.DoEvents();Thread.Sleep(10);} extractRangeTask.GetAwaiter().GetResult();
-                using(PdfSession extractRangePdf=new PdfSession(extractRange)) if(extractRangePdf.PageCount!=5) throw new InvalidOperationException("Workflow smoke: inclusive 4-8 extraction did not create five pages.");
+                PdfSession extractRangePdf=new PdfSession(extractRange); if(extractRangePdf.PageCount!=5) throw new InvalidOperationException("Workflow smoke: inclusive 4-8 extraction did not create five pages."); extractRangePdf=null;
 
                 ActivateDocument(firstWorkspace); Application.DoEvents(); int beforeSplitMerge=_outputs.Count;
                 Task mergeSplitTask=MergePdfFilesCoreAsync(new string[]{mergePart},-1); while(!mergeSplitTask.IsCompleted){Application.DoEvents();Thread.Sleep(10);} mergeSplitTask.GetAwaiter().GetResult();
