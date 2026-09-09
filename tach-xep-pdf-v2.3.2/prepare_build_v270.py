@@ -13,6 +13,14 @@ s = s.replace(old, new, 1)
 
 s = s.replace('release-v2.6.1', 'release-v2.7.0').replace('v2.6.1', 'v2.7.0').replace('2.6.1', '2.7.0')
 
+# The project file does not exist while source patches are running. Inject PDFsharp into the
+# generated csproj text immediately before it is written, which is safely before restore/publish.
+project_write = "Set-Content (Join-Path $Project 'TachXepTrangPDF.csproj') $proj -Encoding UTF8"
+if project_write not in s:
+    raise SystemExit('generated csproj write marker missing')
+pdfsharp_line = "$proj = $proj.Replace('<PackageReference Include=\"Microsoft.ML.OnnxRuntime\" Version=\"1.22.1\" />','<PackageReference Include=\"Microsoft.ML.OnnxRuntime\" Version=\"1.22.1\" />`r`n    <PackageReference Include=\"PDFsharp\" Version=\"6.2.4\" />')"
+s = s.replace(project_write, pdfsharp_line + "\n" + project_write, 1)
+
 old_req = "'PreviewPanMouseDown','PreviewPanMouseMove','SetPreviewPanPosition','CanPanPreview','AutoScroll = true','AutoScrollMinSize','Xoay trái 90°'"
 new_req = "'PreviewPanMouseDown','PreviewPanMouseMove','SetPreviewPanPosition','CanPanPreview','AutoScroll = true','AutoScrollMinSize','UiTheme','PageRangeDialog','PdfPageComposer','OriginalWorkPath','PrepareDocumentListForOpen','RemoveSelectedFileFromList','ClearAllDocumentsFromButton','MergePdfFilesCoreAsync','ExtractSelectedPageAsync','ExtractRangeWithDialogAsync','ExtractPagesToPathAsync','ImportedFullPage','Ghép thêm PDF','Tách trang','Xóa tệp','Xóa tất cả','Xoay trái 90°'"
 if old_req not in s:
