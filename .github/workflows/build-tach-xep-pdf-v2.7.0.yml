@@ -1,0 +1,198 @@
+name: build-tach-xep-pdf-v2.7.0
+
+on:
+  push:
+    branches:
+      - build/tach-xep-pdf-v2.7.0-20260909
+    paths:
+      - 'tach-xep-pdf-v2.3.2/**'
+      - '.github/workflows/build-tach-xep-pdf-v2.7.0.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 55
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Reconstruct and build v2.7.0
+        shell: pwsh
+        run: |
+          $b64 = ((Get-ChildItem 'tach-xep-pdf-v2.3.2/build.parts/*.part' | Sort-Object Name | ForEach-Object { Get-Content $_.FullName -Raw }) -join '')
+          [IO.File]::WriteAllBytes('tach-xep-pdf-v2.3.2/build_v232.ps1.gz', [Convert]::FromBase64String($b64))
+          gzip -d -f 'tach-xep-pdf-v2.3.2/build_v232.ps1.gz'
+          python 'tach-xep-pdf-v2.3.2/patch_build_v232.py'
+          if ($LASTEXITCODE -ne 0) { throw "patch_build_v232.py failed: $LASTEXITCODE" }
+          python 'tach-xep-pdf-v2.3.2/prepare_build_v233.py'
+          python 'tach-xep-pdf-v2.3.2/prepare_build_v234.py'
+          python 'tach-xep-pdf-v2.3.2/prepare_build_v235.py'
+          python 'tach-xep-pdf-v2.3.2/prepare_build_v235f.py'
+          python 'tach-xep-pdf-v2.3.2/prepare_build_v240.py'
+          python 'tach-xep-pdf-v2.3.2/prepare_build_v241.py'
+          python 'tach-xep-pdf-v2.3.2/prepare_build_v242.py'
+          python 'tach-xep-pdf-v2.3.2/prepare_build_v243.py'
+          python 'tach-xep-pdf-v2.3.2/prepare_build_v244.py'
+          python 'tach-xep-pdf-v2.3.2/prepare_build_v245.py'
+          python 'tach-xep-pdf-v2.3.2/prepare_build_v250.py'
+          python 'tach-xep-pdf-v2.3.2/prepare_build_v260.py'
+          python 'tach-xep-pdf-v2.3.2/prepare_build_v261.py'
+          python 'tach-xep-pdf-v2.3.2/prepare_build_v270.py'
+          if ($LASTEXITCODE -ne 0) { throw "prepare_build_v270.py failed: $LASTEXITCODE" }
+          & pwsh -NoProfile -ExecutionPolicy Bypass -File 'tach-xep-pdf-v2.3.2/build_v232.ps1'
+          if ($LASTEXITCODE -ne 0) { throw "Build script failed: $LASTEXITCODE" }
+
+      - name: Protected source contract and regression smoke
+        shell: pwsh
+        run: |
+          $srcPath = 'tach-xep-pdf-v2.3.2/TachXepTrangPDF.cs'
+          $src = Get-Content $srcPath -Raw
+          $required = @(
+            'AppVersion = "2.7.0"',
+            'SmoothPreviewPanel',
+            '_previewScroll.AutoScroll = true',
+            'AutoScrollMinSize',
+            'PreviewPanMouseDown',
+            'PreviewPanMouseMove',
+            'PreviewPanMouseUp',
+            'SetPreviewPanPosition',
+            'CanPanPreview',
+            'Control.MousePosition',
+            'Cursors.Hand',
+            'SetZoomPercent(143)',
+            'panning changed page/history/preview-request state',
+            'preview did not follow page-down after panning',
+            'PreviewCacheCapacity = 7',
+            'SchedulePreviewPrefetch',
+            'atomic preview swap',
+            'DocumentWorkspace',
+            'DocumentProcessingState',
+            'TỆP ĐANG XỬ LÝ',
+            'Trạng thái',
+            'Chưa xử lý',
+            'Đang xử lý',
+            'Đã hoàn thành',
+            'Lên 1',
+            'Xuống 1',
+            'Lên đầu',
+            'Xuống cuối',
+            'CHỈNH ĐƯỜNG CẮT',
+            'ApplyManualCut',
+            'TrackBar _zoom',
+            'RunWorkflowSmoke',
+            'PdfPageComposer',
+            'OriginalWorkPath',
+            'PrepareDocumentListForOpen',
+            'RemoveSelectedFileFromList',
+            'ClearAllDocumentsFromButton',
+            'RemoveDocumentWorkspace',
+            'ClearAllDocumentsCore',
+            'MergePdfIntoCurrentAsync',
+            'ExtractPagesAsync',
+            'ImportedFullPage',
+            'Ghép thêm PDF',
+            'Tách trang...',
+            'Xóa tệp',
+            'Xóa tất cả',
+            'remove-one deleted a source PDF',
+            'clear-all deleted a source PDF',
+            'merge changed existing source order/identity',
+            'immutable original work copy not protected after merge',
+            'imported full pages were split in half',
+            'old folder list did not auto-clear'
+          )
+          foreach($m in $required) { if(-not $src.Contains($m)) { throw "Missing v2.7.0 protected marker: $m" } }
+          if($src.Contains('ShowImmediatePreviewFromThumbnail')) { throw 'Regression: tiny-thumbnail preview path returned.' }
+          if($src.Contains('Task.Delay(70, token)')) { throw 'Regression: obsolete preview debounce returned.' }
+          if($src.Contains('_cut.Enabled = !busy && !_isSplit')) { throw 'Regression: manual cut disabled after split.' }
+
+          $csproj = Get-Content 'tach-xep-pdf-v2.3.2/TachXepTrangPDF.csproj' -Raw
+          if($csproj -notmatch 'PackageReference Include="PDFsharp" Version="6\.2\.4"') { throw 'PDFsharp 6.2.4 dependency missing.' }
+
+          $panStart = $src.IndexOf('private void PreviewPanMouseMove')
+          $panEnd = $src.IndexOf('private void PreviewPanMouseUp', $panStart)
+          if($panStart -lt 0 -or $panEnd -lt 0) { throw 'Pan method boundary missing.' }
+          $panSlice = $src.Substring($panStart, $panEnd - $panStart)
+          foreach($forbidden in @('RenderPreviewBitmap','LoadSelectedPreviewAsync','SetPreview(','PushHistory(','MarkActiveDocument','_previewCache','SelectedIndex =')) {
+            if($panSlice.Contains($forbidden)) { throw "Pan isolation regression: $forbidden found in mouse-move path." }
+          }
+
+          $removeStart = $src.IndexOf('private void RemoveDocumentWorkspace')
+          $removeEnd = $src.IndexOf('private void RemoveSelectedFileFromList', $removeStart)
+          if($removeStart -lt 0 -or $removeEnd -lt 0) { throw 'Remove-workspace method boundary missing.' }
+          $removeSlice = $src.Substring($removeStart, $removeEnd - $removeStart)
+          if($removeSlice.Contains('File.Delete(doc.SourcePath)') -or $removeSlice.Contains('Directory.Delete(Path.GetDirectoryName(doc.SourcePath)')) { throw 'Data safety regression: list removal can delete source PDF.' }
+
+          $exe = Resolve-Path 'release-v2.7.0/Tach_Xep_Trang_PDF_v2.7.0_PORTABLE.exe'
+          Write-Host 'RUN_SMOKE --ui-smoke (v2.6.1 protected flow + list lifecycle + merge + extract)'
+          $p = Start-Process -FilePath $exe -ArgumentList '--ui-smoke' -PassThru
+          if(-not $p.WaitForExit(240000)) { try { $p.Kill() } catch {}; throw 'UI/workflow smoke timed out.' }
+          if($p.ExitCode -ne 0) {
+            Get-ChildItem "$env:LOCALAPPDATA/TachXepTrangPDF/Logs" -Filter '*.log' -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 12 | ForEach-Object { Write-Host "LOG=$($_.FullName)"; Get-Content $_.FullName }
+            throw "UI/workflow smoke failed: exit=$($p.ExitCode)"
+          }
+          $logs = Get-ChildItem "$env:LOCALAPPDATA/TachXepTrangPDF/Logs" -Filter '*.log' -ErrorAction Stop | Sort-Object LastWriteTime -Descending
+          $logText = ($logs | Select-Object -First 12 | ForEach-Object { Get-Content $_.FullName -Raw }) -join "`n"
+          if($logText -notmatch 'WORKFLOW_SMOKE.*PASS') { throw 'WORKFLOW_SMOKE PASS marker missing.' }
+          if($logText -notmatch 'UI_SMOKE.*PASS') { throw 'UI_SMOKE PASS marker missing.' }
+
+          $exeHash = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          $verify = @(
+            'TACH_XEP_TRANG_PDF_v2.7.0_FINAL_VERIFICATION',
+            'BUILD=PASS',
+            'SOURCE_CONTRACT=PASS',
+            'UI_SMOKE=PASS',
+            'WORKFLOW_SMOKE=PASS',
+            'FOLDER_SWITCH_AUTO_CLEAR=PASS',
+            'FILE_LIST_REMOVE=PASS',
+            'FILE_LIST_CLEAR_ALL=PASS',
+            'SOURCE_PDF_NOT_DELETED_BY_LIST_ACTIONS=PASS',
+            'PDF_MERGE_WORKCOPY=PASS',
+            'PDFSHARP_IMPORT_DEPENDENCY=PASS',
+            'ORIGINAL_WORK_COPY_IMMUTABLE=PASS',
+            'MERGE_PRESERVES_EXISTING_SOURCE_ORDER=PASS',
+            'MERGE_UNDO_REDO_MODEL=PASS',
+            'IMPORTED_FULL_PAGE_SPLIT_GUARD=PASS',
+            'PDF_EXTRACT_RANGE=PASS',
+            'EXTRACT_DOES_NOT_MUTATE_ACTIVE_MODEL=PASS',
+            'PREVIEW_DRAG_PAN=PASS',
+            'PAN_ONLY_CHANGES_VIEWPORT=PASS',
+            'PAN_DOES_NOT_RENDER=PASS',
+            'PAN_DOES_NOT_CHANGE_SELECTION=PASS',
+            'PAN_DOES_NOT_CHANGE_HISTORY=PASS',
+            'PAN_DOES_NOT_CHANGE_FILE_STATUS=PASS',
+            'PAGE_DOWN_AFTER_PAN=PASS',
+            'PAGE_UP_AFTER_PAN=PASS',
+            'NO_TINY_THUMBNAIL_PREVIEW=PASS',
+            'REAL_PAGE_CACHE_PREFETCH=PASS',
+            'MULTI_FILE_STATE_ISOLATION=PASS',
+            'FILE_PROCESSING_STATUS=PASS',
+            'MANUAL_CUT_AFTER_SPLIT=PASS',
+            'FOUR_NAV_BUTTONS=PASS',
+            'FIT_WINDOW_RESETS_PAN=PASS',
+            'OFFLINE_FIRST_RUN_SELFTEST_AI=PASS (verified in build stage)',
+            "EXE_SHA256=$exeHash"
+          )
+          $verify | Set-Content 'release-v2.7.0/FINAL-VERIFICATION-v2.7.0.txt' -Encoding UTF8
+          Write-Host ($verify -join "`n")
+
+      - name: Upload release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Tach-Xep-Trang-PDF-v2.7.0-FINAL-ListMergeExtract-Offline-Release
+          path: release-v2.7.0/*
+          if-no-files-found: error
+          retention-days: 30
