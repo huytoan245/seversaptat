@@ -1,0 +1,73 @@
+TACH_XEP_TRANG_PDF_v2.7.0_BUILD_DIAGNOSTIC
+UTC=2026-09-09T03:17:48.5494014Z
+FAILURE:
+Exception: D:\a\_temp\fffcaeaf-f286-4201-9f5b-56854a0323c1.ps1:17
+Line |
+  17 |  …  ($LASTEXITCODE -ne 0) { throw "Build script failed: $LASTEXITCODE" }
+     |                             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+     | Build script failed: 1
+
+
+--- LOG TAIL ---
+**********************
+PowerShell transcript start
+Start time: 20260909031743
+Username: runnervmeef0v\runneradmin
+RunAs User: runnervmeef0v\runneradmin
+Configuration Name: 
+Machine: runnervmeef0v (Microsoft Windows NT 10.0.26100.0)
+Host Application: C:\Program Files\PowerShell\7\pwsh.dll -command . 'D:\a\_temp\fffcaeaf-f286-4201-9f5b-56854a0323c1.ps1'
+Process ID: 9544
+PSVersion: 7.6.5
+PSEdition: Core
+GitCommitId: 7.6.5
+OS: Microsoft Windows 10.0.26100
+Platform: Win32NT
+PSCompatibleVersions: 1.0, 2.0, 3.0, 4.0, 5.0, 5.1, 6.0, 7.0
+PSRemotingProtocolVersion: 2.4
+SerializationVersion: 1.1.0.1
+WSManStackVersion: 3.0
+**********************
+Transcript started, output file is v270-build-diagnostic.log
+
+
+RUN_PREP=prepare_build_v233.py
+
+RUN_PREP=prepare_build_v234.py
+
+RUN_PREP=prepare_build_v235.py
+
+RUN_PREP=prepare_build_v235f.py
+
+RUN_PREP=prepare_build_v240.py
+
+RUN_PREP=prepare_build_v241.py
+
+RUN_PREP=prepare_build_v242.py
+
+RUN_PREP=prepare_build_v243.py
+
+RUN_PREP=prepare_build_v244.py
+
+RUN_PREP=prepare_build_v245.py
+
+RUN_PREP=prepare_build_v250.py
+
+RUN_PREP=prepare_build_v260.py
+
+RUN_PREP=prepare_build_v261.py
+
+RUN_PREP=prepare_build_v270.py
+
+RUN_BUILD_SCRIPT
+
+DIAG_FAILURE
+Exception: D:\a\_temp\fffcaeaf-f286-4201-9f5b-56854a0323c1.ps1:17
+Line |
+  17 |  …  ($LASTEXITCODE -ne 0) { throw "Build script failed: $LASTEXITCODE" }
+     |                             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+     | Build script failed: 1
+**********************
+PowerShell transcript end
+End time: 20260909031748
+**********************
