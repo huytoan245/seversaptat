@@ -33,29 +33,28 @@ jobs:
         run: |
           $failed = $false
           $failure = ''
-          Start-Transcript -Path 'v270-build-diagnostic.log' -Force
+          $childLog = 'v270-child-build.log'
           try {
             $b64 = ((Get-ChildItem 'tach-xep-pdf-v2.3.2/build.parts/*.part' | Sort-Object Name | ForEach-Object { Get-Content $_.FullName -Raw }) -join '')
             [IO.File]::WriteAllBytes('tach-xep-pdf-v2.3.2/build_v232.ps1.gz', [Convert]::FromBase64String($b64))
             gzip -d -f 'tach-xep-pdf-v2.3.2/build_v232.ps1.gz'
-            python 'tach-xep-pdf-v2.3.2/patch_build_v232.py'; if ($LASTEXITCODE -ne 0) { throw "patch_build_v232.py failed: $LASTEXITCODE" }
+            python 'tach-xep-pdf-v2.3.2/patch_build_v232.py' 2>&1 | Tee-Object -FilePath $childLog -Append
+            if ($LASTEXITCODE -ne 0) { throw "patch_build_v232.py failed: $LASTEXITCODE" }
             foreach($prep in @('prepare_build_v233.py','prepare_build_v234.py','prepare_build_v235.py','prepare_build_v235f.py','prepare_build_v240.py','prepare_build_v241.py','prepare_build_v242.py','prepare_build_v243.py','prepare_build_v244.py','prepare_build_v245.py','prepare_build_v250.py','prepare_build_v260.py','prepare_build_v261.py','prepare_build_v270.py')) {
-              Write-Host "RUN_PREP=$prep"
-              python (Join-Path 'tach-xep-pdf-v2.3.2' $prep)
+              "RUN_PREP=$prep" | Tee-Object -FilePath $childLog -Append
+              python (Join-Path 'tach-xep-pdf-v2.3.2' $prep) 2>&1 | Tee-Object -FilePath $childLog -Append
               if ($LASTEXITCODE -ne 0) { throw "$prep failed: $LASTEXITCODE" }
             }
-            Write-Host 'RUN_BUILD_SCRIPT'
-            & pwsh -NoProfile -ExecutionPolicy Bypass -File 'tach-xep-pdf-v2.3.2/build_v232.ps1'
-            if ($LASTEXITCODE -ne 0) { throw "Build script failed: $LASTEXITCODE" }
+            'RUN_BUILD_SCRIPT' | Tee-Object -FilePath $childLog -Append
+            & pwsh -NoProfile -ExecutionPolicy Bypass -File 'tach-xep-pdf-v2.3.2/build_v232.ps1' 2>&1 | Tee-Object -FilePath $childLog -Append
+            $buildExit = $LASTEXITCODE
+            if ($buildExit -ne 0) { throw "Build script failed: $buildExit" }
           }
           catch {
             $failed = $true
             $failure = ($_ | Out-String)
             Write-Host 'DIAG_FAILURE'
             Write-Host $failure
-          }
-          finally {
-            Stop-Transcript
           }
 
           if ($failed) {
@@ -65,13 +64,13 @@ jobs:
               ('UTC=' + [DateTime]::UtcNow.ToString('o')),
               'FAILURE:',
               $failure,
-              '--- LOG TAIL ---'
+              '--- CHILD LOG TAIL ---'
             ) | Set-Content 'diagnostics/v270-build-error.txt' -Encoding UTF8
-            Get-Content 'v270-build-diagnostic.log' -Tail 350 | Add-Content 'diagnostics/v270-build-error.txt' -Encoding UTF8
+            if(Test-Path $childLog) { Get-Content $childLog -Tail 500 | Add-Content 'diagnostics/v270-build-error.txt' -Encoding UTF8 }
             git config user.name 'github-actions[bot]'
             git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
             git add diagnostics/v270-build-error.txt
-            git commit -m 'diagnostics: capture v2.7.0 build failure'
+            git commit -m 'diagnostics: capture v2.7.0 child build output'
             git push origin HEAD:build/tach-xep-pdf-v2.7.0-20260909
             exit 1
           }
