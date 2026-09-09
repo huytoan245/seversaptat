@@ -1,0 +1,79 @@
+name: diagnose-tach-xep-pdf-v2.7.0
+
+on:
+  push:
+    branches:
+      - build/tach-xep-pdf-v2.7.0-20260909
+    paths:
+      - '.github/workflows/diagnose-tach-xep-pdf-v2.7.0.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  diagnose:
+    runs-on: windows-latest
+    timeout-minutes: 55
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Reproduce build and persist failure tail
+        shell: pwsh
+        run: |
+          $failed = $false
+          $failure = ''
+          Start-Transcript -Path 'v270-build-diagnostic.log' -Force
+          try {
+            $b64 = ((Get-ChildItem 'tach-xep-pdf-v2.3.2/build.parts/*.part' | Sort-Object Name | ForEach-Object { Get-Content $_.FullName -Raw }) -join '')
+            [IO.File]::WriteAllBytes('tach-xep-pdf-v2.3.2/build_v232.ps1.gz', [Convert]::FromBase64String($b64))
+            gzip -d -f 'tach-xep-pdf-v2.3.2/build_v232.ps1.gz'
+            python 'tach-xep-pdf-v2.3.2/patch_build_v232.py'; if ($LASTEXITCODE -ne 0) { throw "patch_build_v232.py failed: $LASTEXITCODE" }
+            foreach($prep in @('prepare_build_v233.py','prepare_build_v234.py','prepare_build_v235.py','prepare_build_v235f.py','prepare_build_v240.py','prepare_build_v241.py','prepare_build_v242.py','prepare_build_v243.py','prepare_build_v244.py','prepare_build_v245.py','prepare_build_v250.py','prepare_build_v260.py','prepare_build_v261.py','prepare_build_v270.py')) {
+              Write-Host "RUN_PREP=$prep"
+              python (Join-Path 'tach-xep-pdf-v2.3.2' $prep)
+              if ($LASTEXITCODE -ne 0) { throw "$prep failed: $LASTEXITCODE" }
+            }
+            Write-Host 'RUN_BUILD_SCRIPT'
+            & pwsh -NoProfile -ExecutionPolicy Bypass -File 'tach-xep-pdf-v2.3.2/build_v232.ps1'
+            if ($LASTEXITCODE -ne 0) { throw "Build script failed: $LASTEXITCODE" }
+          }
+          catch {
+            $failed = $true
+            $failure = ($_ | Out-String)
+            Write-Host 'DIAG_FAILURE'
+            Write-Host $failure
+          }
+          finally {
+            Stop-Transcript
+          }
+
+          if ($failed) {
+            New-Item -ItemType Directory -Path diagnostics -Force | Out-Null
+            @(
+              'TACH_XEP_TRANG_PDF_v2.7.0_BUILD_DIAGNOSTIC',
+              ('UTC=' + [DateTime]::UtcNow.ToString('o')),
+              'FAILURE:',
+              $failure,
+              '--- LOG TAIL ---'
+            ) | Set-Content 'diagnostics/v270-build-error.txt' -Encoding UTF8
+            Get-Content 'v270-build-diagnostic.log' -Tail 350 | Add-Content 'diagnostics/v270-build-error.txt' -Encoding UTF8
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git add diagnostics/v270-build-error.txt
+            git commit -m 'diagnostics: capture v2.7.0 build failure'
+            git push origin HEAD:build/tach-xep-pdf-v2.7.0-20260909
+            exit 1
+          }
+
+          Write-Host 'DIAG_BUILD_PASS'
