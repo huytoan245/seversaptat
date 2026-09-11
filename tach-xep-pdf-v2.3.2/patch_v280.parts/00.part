@@ -1,0 +1,131 @@
+from pathlib import Path
+import re
+
+root=Path('tach-xep-pdf-v2.3.2')
+p=root/'TachXepTrangPDF.cs'
+s=p.read_text(encoding='utf-8-sig')
+
+def rep(old,new,label,count=1):
+    global s
+    if old not in s:
+        raise SystemExit('v280 marker missing: '+label)
+    s=s.replace(old,new,count)
+
+# Version identity
+rep('internal const string Version = "2.7.0";','internal const string Version = "2.8.0";','diagnostic version')
+rep('startup-v2.7.0.log','startup-v2.8.0.log','startup log')
+rep('private const string AppVersion = "2.7.0";','private const string AppVersion = "2.8.0";','app version')
+
+# Backup/session maintenance: keep disk usage bounded on small SSDs.
+insert='    internal sealed class SourceFace\n'
+backup=r'''    internal static class BackupMaintenance
+    {
+        private const int CleanupEverySessions = 3;
+        private const int KeepNewestBackups = 3;
+        private const long MaxBackupBytes = 2L * 1024L * 1024L * 1024L;
+
+        internal static void CleanupOrphanSessions(string sessionRoot)
+        {
+            try
+            {
+                if (!Directory.Exists(sessionRoot)) return;
+                DateTime cutoff = DateTime.Now.AddHours(-12);
+                foreach (string dir in Directory.GetDirectories(sessionRoot))
+                {
+                    try { if (Directory.GetLastWriteTime(dir) < cutoff) Directory.Delete(dir, true); } catch { }
+                }
+            }
+            catch { }
+        }
+
+        internal static void RegisterCleanSession(string baseDirectory)
+        {
+            try
+            {
+                Directory.CreateDirectory(baseDirectory);
+                string statePath = Path.Combine(baseDirectory, "backup-cleanup-state.txt");
+                int count = 0;
+                try { if (File.Exists(statePath)) int.TryParse(File.ReadAllText(statePath).Trim(), out count); } catch { count = 0; }
+                count++;
+                if (count >= CleanupEverySessions)
+                {
+                    CleanupBackups(Path.Combine(baseDirectory, "Backups"));
+                    count = 0;
+                }
+                File.WriteAllText(statePath, count.ToString(), Encoding.UTF8);
+            }
+            catch { }
+        }
+
+        internal static void CleanupBackups(string backupRoot)
+        {
+            try
+            {
+                if (!Directory.Exists(backupRoot)) return;
+                List<FileInfo> files = Directory.GetFiles(backupRoot, "*.pdf", SearchOption.AllDirectories)
+                    .Select(delegate(string x) { return new FileInfo(x); })
+                    .OrderByDescending(delegate(FileInfo x) { return x.LastWriteTimeUtc; }).ToList();
+                long keptBytes = 0;
+                for (int i=0;i<files.Count;i++)
+                {
+                    bool keep = i < KeepNewestBackups && (i == 0 || keptBytes + files[i].Length <= MaxBackupBytes);
+                    if (keep) { keptBytes += files[i].Length; continue; }
+                    try { files[i].Delete(); } catch { }
+                }
+                foreach (string dir in Directory.GetDirectories(backupRoot, "*", SearchOption.AllDirectories).OrderByDescending(delegate(string x) { return x.Length; }))
+                    try { if (!Directory.EnumerateFileSystemEntries(dir).Any()) Directory.Delete(dir); } catch { }
+            }
+            catch { }
+        }
+    }
+
+'''
+rep(insert,backup+insert,'backup maintenance insertion')
+rep('                Directory.CreateDirectory(SessionDirectory);\n                Log("START",', '                Directory.CreateDirectory(SessionDirectory);\n                BackupMaintenance.CleanupOrphanSessions(SessionDirectory);\n                Log("START",','orphan cleanup startup')
+
+# Theme: grouped functional colors and vector history arrows (no font glyph dependency).
+theme_anchor='        internal static readonly Color SecondaryHover = Color.FromArgb(241, 245, 249);\n'
+theme_colors='''        internal static readonly Color SecondaryHover = Color.FromArgb(241, 245, 249);\n        internal static readonly Color Rotate = Color.FromArgb(224, 231, 255);\n        internal static readonly Color RotateHover = Color.FromArgb(199, 210, 254);\n        internal static readonly Color Structure = Color.FromArgb(237, 233, 254);\n        internal static readonly Color StructureHover = Color.FromArgb(221, 214, 254);\n        internal static readonly Color History = Color.FromArgb(204, 251, 241);\n        internal static readonly Color HistoryHover = Color.FromArgb(153, 246, 228);\n        internal static readonly Color Success = Color.FromArgb(220, 252, 231);\n        internal static readonly Color SuccessHover = Color.FromArgb(187, 247, 208);\n        internal static readonly Color Danger = Color.FromArgb(254, 226, 226);\n        internal static readonly Color DangerHover = Color.FromArgb(254, 202, 202);\n'''
+rep(theme_anchor,theme_colors,'theme colors')
+menu_marker='        internal static ContextMenuStrip Menu()\n        {\n            ContextMenuStrip menu = new ContextMenuStrip(); menu.ShowImageMargin = false; menu.BackColor = Surface; menu.ForeColor = Text; menu.Font = Font(9.25f); menu.Padding = new Padding(4); return menu;\n        }\n'
+menu_new=menu_marker+'''        internal static void ApplyTone(Button b, string tone)\n        {\n            if (b == null) return; Color bg = Surface, hover = SecondaryHover, down = Border, fg = Text;\n            switch ((tone ?? "").ToLowerInvariant())\n            {\n                case "rotate": bg=Rotate; hover=RotateHover; down=Color.FromArgb(165,180,252); break;\n                case "structure": bg=Structure; hover=StructureHover; down=Color.FromArgb(196,181,253); break;\n                case "history": bg=History; hover=HistoryHover; down=Color.FromArgb(94,234,212); break;\n                case "success": bg=Success; hover=SuccessHover; down=Color.FromArgb(134,239,172); break;\n                case "danger": bg=Danger; hover=DangerHover; down=Color.FromArgb(252,165,165); fg=Color.FromArgb(153,27,27); break;\n            }\n            b.UseVisualStyleBackColor=false; b.BackColor=bg; b.ForeColor=fg; b.FlatAppearance.MouseOverBackColor=hover; b.FlatAppearance.MouseDownBackColor=down;\n        }\n'''
+rep(menu_marker,menu_new,'tone helper')
+rep('    internal sealed class FluentButton : Button','    internal class FluentButton : Button','unseal fluent')
+fluent_end='    internal sealed class PageRangeDialog : Form\n'
+history_cls=r'''    internal sealed class HistoryArrowButton : FluentButton
+    {
+        private readonly bool _forward;
+        internal HistoryArrowButton(bool forward) : base(false) { _forward=forward; Padding=new Padding(28,0,8,0); }
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            base.OnPaint(e);
+            e.Graphics.SmoothingMode=SmoothingMode.AntiAlias;
+            Rectangle r=new Rectangle(9, Math.Max(5,(Height-16)/2),16,16);
+            using(Pen pen=new Pen(ForeColor,2f))
+            {
+                if(_forward)
+                {
+                    e.Graphics.DrawArc(pen,r,-70,280);
+                    Point a=new Point(r.Right-1,r.Top+3); e.Graphics.DrawLine(pen,a,new Point(a.X-6,a.Y-1)); e.Graphics.DrawLine(pen,a,new Point(a.X-2,a.Y+5));
+                }
+                else
+                {
+                    e.Graphics.DrawArc(pen,r,-210,280);
+                    Point a=new Point(r.Left+1,r.Top+3); e.Graphics.DrawLine(pen,a,new Point(a.X+6,a.Y-1)); e.Graphics.DrawLine(pen,a,new Point(a.X+2,a.Y+5));
+                }
+            }
+        }
+    }
+
+'''
+rep(fluent_end,history_cls+fluent_end,'history arrow class')
+
+# Runtime fields: persistent AI session + one-shot cleanup guard.
+rep('        private bool _applyingResponsiveLayout;\n', '        private bool _applyingResponsiveLayout;\n        private bool _cleanupPerformed;\n        private OnnxOrientationAnalyzer _orientationAnalyzer;\n','runtime fields')
+
+# Copy-on-write workspace: only one full PDF copy while merely editing.
+old_ensure='''            doc.SessionDir = AppDiagnostics.CreateSessionDirectory();\n            doc.OriginalWorkPath = Path.Combine(doc.SessionDir, "original-at-open.pdf");\n            doc.WorkPath = Path.Combine(doc.SessionDir, "work.pdf");\n            File.Copy(doc.SourcePath, doc.OriginalWorkPath, true);\n            File.Copy(doc.OriginalWorkPath, doc.WorkPath, true);'''
+new_ensure='''            doc.SessionDir = AppDiagnostics.CreateSessionDirectory();\n            doc.OriginalWorkPath = Path.Combine(doc.SessionDir, "original-at-open.pdf");\n            File.Copy(doc.SourcePath, doc.OriginalWorkPath, true);\n            // v2.8 copy-on-write: use the immutable session copy directly until a physical\n            // operation (for example merge) needs a new work revision. This halves session disk use.\n            doc.WorkPath = doc.OriginalWorkPath;'''
+rep(old_ensure,new_ensure,'copy on write')
+
+# Direct page tools below rotate/history row; prevent automatic wrapping.
