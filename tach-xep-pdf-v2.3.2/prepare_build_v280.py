@@ -4,7 +4,7 @@ p = Path('tach-xep-pdf-v2.3.2/build_v232.ps1')
 s = p.read_text(encoding='utf-8-sig')
 
 old = "; & python (Join-Path $Project 'patch_v270_launcher.py'); if ($LASTEXITCODE -ne 0) { throw 'patch_v270_launcher.py failed' } }"
-new = "; & python (Join-Path $Project 'patch_v270_launcher.py'); if ($LASTEXITCODE -ne 0) { throw 'patch_v270_launcher.py failed' }; & python (Join-Path $Project 'patch_v280.py'); if ($LASTEXITCODE -ne 0) { throw 'patch_v280.py failed' } }"
+new = "; & python (Join-Path $Project 'patch_v270_launcher.py'); if ($LASTEXITCODE -ne 0) { throw 'patch_v270_launcher.py failed' }; & python (Join-Path $Project 'patch_v280.py'); if ($LASTEXITCODE -ne 0) { throw 'patch_v280.py failed' }; & python (Join-Path $Project 'patch_v280_smoke_labels.py'); if ($LASTEXITCODE -ne 0) { throw 'patch_v280_smoke_labels.py failed' } }"
 if old not in s:
     raise SystemExit('v2.7 final patch-chain marker missing')
 s = s.replace(old, new, 1)
@@ -12,7 +12,7 @@ s = s.replace(old, new, 1)
 s = s.replace('release-v2.7.0', 'release-v2.8.0').replace('v2.7.0', 'v2.8.0').replace('2.7.0', '2.8.0')
 
 old_snapshot = "(Join-Path $Project 'patch_v270_launcher.py'), (Join-Path $Project 'prepare_build_v270.py'), (Join-Path $Project 'regression_test.py'),"
-new_snapshot = "(Join-Path $Project 'patch_v270_launcher.py'), (Join-Path $Project 'prepare_build_v270.py'), (Join-Path $Project 'patch_v280.py'), (Join-Path $Project 'prepare_build_v280.py'), (Join-Path $Project 'regression_test.py'),"
+new_snapshot = "(Join-Path $Project 'patch_v270_launcher.py'), (Join-Path $Project 'prepare_build_v270.py'), (Join-Path $Project 'patch_v280.py'), (Join-Path $Project 'patch_v280_smoke_labels.py'), (Join-Path $Project 'prepare_build_v280.py'), (Join-Path $Project 'regression_test.py'),"
 if old_snapshot not in s:
     raise SystemExit('v2.7 source snapshot marker missing')
 s = s.replace(old_snapshot, new_snapshot, 1)
