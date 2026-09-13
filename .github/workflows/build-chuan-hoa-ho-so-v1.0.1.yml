@@ -60,7 +60,6 @@ jobs:
 
           $text = [IO.File]::ReadAllText($src, [Text.Encoding]::UTF8)
           $text = [regex]::Replace($text, '(?m)^\s*Write-Output "SELFTEST_OK v\$\(\$script:AppVersion\)"\r?\n', '')
-          # Windows PowerShell 5.1 needs System.IO.Compression explicitly for ZipArchive used by XLSX self-test.
           $text = $text.Replace('Add-Type -AssemblyName System.IO.Compression.FileSystem', "Add-Type -AssemblyName System.IO.Compression`nAdd-Type -AssemblyName System.IO.Compression.FileSystem")
           [IO.File]::WriteAllText($src, $text, [Text.UTF8Encoding]::new($true))
 
@@ -131,7 +130,7 @@ jobs:
           $dist = Join-Path $base 'dist'
           New-Item -ItemType Directory -Force -Path $dist | Out-Null
           $exe = Join-Path $dist 'ChuanHoaHoSoDangVien_v1.0.1.exe'
-          Invoke-PS2EXE -InputFile $src -OutputFile $exe -NoConsole -STA -DPIAware -LongPaths -SupportOS -Title 'Chuẩn hóa thư mục hồ sơ đảng viên' -Description 'Đối chiếu danh sách nguồn, cảnh báo sai lệch và chuẩn hóa tên thư mục hồ sơ đảng viên an toàn' -Company 'Nguyễn Huy Toàn - Văn phòng Đảng ủy xã Thanh Lâm' -Product 'Chuẩn hóa Hồ sơ Đảng viên' -Copyright 'Nguyễn Huy Toàn - Văn phòng Đảng ủy xã Thanh Lâm' -Version '1.0.1.0'
+          Invoke-PS2EXE -InputFile $src -OutputFile $exe -NoConsole -STA -DPIAware -LongPaths -SupportOS -Title 'Chuan hoa thu muc ho so dang vien' -Description 'Doi chieu danh sach nguon va chuan hoa ten thu muc ho so dang vien an toan' -Company 'Nguyen Huy Toan - Van phong Dang uy xa Thanh Lam' -Product 'Chuan hoa Ho so Dang vien' -Copyright 'Nguyen Huy Toan - Van phong Dang uy xa Thanh Lam' -Version '1.0.1.0'
           if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) { throw 'EXE was not created.' }
           if ((Get-Item $exe).Length -lt 20000) { throw 'EXE size is unexpectedly small.' }
 
