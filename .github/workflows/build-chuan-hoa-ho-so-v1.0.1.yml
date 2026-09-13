@@ -1,0 +1,190 @@
+name: build-chuan-hoa-ho-so-v1.0.1
+
+on:
+  push:
+    branches:
+      - build/chuan-hoa-ho-so-v1.0.1-20260914
+    paths:
+      - 'chuan-hoa-ho-so-v1.0.1/src_final/**'
+      - 'chuan-hoa-ho-so-v1.0.1/test_core.py.gz.b64'
+      - '.github/workflows/build-chuan-hoa-ho-so-v1.0.1.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-test-windows:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: build/chuan-hoa-ho-so-v1.0.1-20260914
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Reconstruct audited source and tests
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $base = Join-Path $env:GITHUB_WORKSPACE 'chuan-hoa-ho-so-v1.0.1'
+          New-Item -ItemType Directory -Force -Path (Join-Path $base 'work') | Out-Null
+
+          function Expand-GzipBase64([string]$b64, [string]$dest) {
+            $bytes = [Convert]::FromBase64String($b64)
+            $input = [IO.MemoryStream]::new($bytes)
+            $gzip = [IO.Compression.GzipStream]::new($input, [IO.Compression.CompressionMode]::Decompress)
+            $output = [IO.MemoryStream]::new()
+            try { $gzip.CopyTo($output); [IO.File]::WriteAllBytes($dest, $output.ToArray()) }
+            finally { $output.Dispose(); $gzip.Dispose(); $input.Dispose() }
+          }
+
+          $parts = Get-ChildItem (Join-Path $base 'src_final') -Filter 'chunk_*.txt' | Sort-Object Name
+          if ($parts.Count -ne 5) { throw "Expected 5 source chunks, got $($parts.Count)" }
+          $sourceB64 = ($parts | ForEach-Object { (Get-Content $_.FullName -Raw).Trim() }) -join ''
+          $src = Join-Path $base 'work\ChuanHoaHoSoDangVien.ps1'
+          Expand-GzipBase64 $sourceB64 $src
+
+          # Release build: SelfTestOnly must be silent so a no-console EXE cannot show an output dialog.
+          $text = [IO.File]::ReadAllText($src, [Text.Encoding]::UTF8)
+          $text = [regex]::Replace($text, '(?m)^\s*Write-Output "SELFTEST_OK v\$\(\$script:AppVersion\)"\r?\n', '')
+          [IO.File]::WriteAllText($src, $text, [Text.UTF8Encoding]::new($false))
+
+          $testB64 = (Get-Content (Join-Path $base 'test_core.py.gz.b64') -Raw).Trim()
+          $test = Join-Path $base 'work\test_core.py'
+          Expand-GzipBase64 $testB64 $test
+
+          $sourceHash = (Get-FileHash $src -Algorithm SHA256).Hash.ToLowerInvariant()
+          $testHash = (Get-FileHash $test -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($sourceHash -ne 'c797b3b6b3414210a62da7e2ecf7ca6a2e4bd6b5fa689cfb512ecd399b36f8ec') { throw "Source hash mismatch: $sourceHash" }
+          if ($testHash -ne '8fe8cbfae3ca579d397a5d15aa94f0973e3ab559a8bc374a45fa70bdceb64ca9') { throw "Test hash mismatch: $testHash" }
+          "SOURCE_SHA256=$sourceHash" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: PowerShell 5.1 parser check
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $src = Join-Path $env:GITHUB_WORKSPACE 'chuan-hoa-ho-so-v1.0.1\work\ChuanHoaHoSoDangVien.ps1'
+          $checker = Join-Path $env:RUNNER_TEMP 'parse_check.ps1'
+          @'
+          param([string]$Path)
+          $tokens = $null
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile($Path, [ref]$tokens, [ref]$errors) | Out-Null
+          if ($errors.Count -gt 0) {
+              $errors | ForEach-Object { Write-Error ($_.Message + ' at ' + $_.Extent.StartLineNumber + ':' + $_.Extent.StartColumnNumber) }
+              exit 2
+          }
+          exit 0
+          '@ | Set-Content -LiteralPath $checker -Encoding UTF8
+          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $checker -Path $src
+          if ($LASTEXITCODE -ne 0) { throw "PowerShell 5.1 parser check failed: $LASTEXITCODE" }
+
+      - name: Run 21 core logic and branch safety tests
+        shell: pwsh
+        run: |
+          $test = Join-Path $env:GITHUB_WORKSPACE 'chuan-hoa-ho-so-v1.0.1\work\test_core.py'
+          python $test
+          if ($LASTEXITCODE -ne 0) { throw "Python core tests failed: $LASTEXITCODE" }
+
+      - name: Run real PowerShell extended integration self-test
+        shell: pwsh
+        run: |
+          $src = Join-Path $env:GITHUB_WORKSPACE 'chuan-hoa-ho-so-v1.0.1\work\ChuanHoaHoSoDangVien.ps1'
+          & powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File $src -SelfTestOnly -ExtendedSelfTest
+          if ($LASTEXITCODE -ne 0) { throw "PowerShell integration self-test failed: $LASTEXITCODE" }
+
+      - name: Install pinned PS2EXE 1.0.18
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+          Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
+          Install-Module -Name ps2exe -RequiredVersion 1.0.18 -Scope CurrentUser -Force -AllowClobber
+          Import-Module ps2exe -RequiredVersion 1.0.18 -Force
+          $m = Get-Module ps2exe
+          if (-not $m -or $m.Version.ToString() -ne '1.0.18') { throw 'Pinned ps2exe 1.0.18 was not loaded.' }
+
+      - name: Compile direct Windows EXE
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Import-Module ps2exe -RequiredVersion 1.0.18 -Force
+          $base = Join-Path $env:GITHUB_WORKSPACE 'chuan-hoa-ho-so-v1.0.1'
+          $src = Join-Path $base 'work\ChuanHoaHoSoDangVien.ps1'
+          $dist = Join-Path $base 'dist'
+          New-Item -ItemType Directory -Force -Path $dist | Out-Null
+          $exe = Join-Path $dist 'ChuanHoaHoSoDangVien_v1.0.1.exe'
+          Invoke-PS2EXE -InputFile $src -OutputFile $exe -NoConsole -STA -DPIAware -LongPaths -SupportOS -Title 'Chuẩn hóa thư mục hồ sơ đảng viên' -Description 'Đối chiếu danh sách nguồn, cảnh báo sai lệch và chuẩn hóa tên thư mục hồ sơ đảng viên an toàn' -Company 'Nguyễn Huy Toàn - Văn phòng Đảng ủy xã Thanh Lâm' -Product 'Chuẩn hóa Hồ sơ Đảng viên' -Copyright 'Nguyễn Huy Toàn - Văn phòng Đảng ủy xã Thanh Lâm' -Version '1.0.1.0'
+          if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) { throw 'EXE was not created.' }
+          if ((Get-Item $exe).Length -lt 20000) { throw 'EXE size is unexpectedly small.' }
+
+      - name: Run compiled EXE extended self-test
+        shell: pwsh
+        run: |
+          $exe = Join-Path $env:GITHUB_WORKSPACE 'chuan-hoa-ho-so-v1.0.1\dist\ChuanHoaHoSoDangVien_v1.0.1.exe'
+          $p = Start-Process -FilePath $exe -ArgumentList @('-SelfTestOnly','-ExtendedSelfTest') -PassThru
+          if (-not $p.WaitForExit(120000)) { try { Stop-Process -Id $p.Id -Force } catch {}; throw 'Compiled EXE self-test timed out.' }
+          if ($p.ExitCode -ne 0) { throw "Compiled EXE self-test failed: $($p.ExitCode)" }
+
+      - name: WPF startup smoke test
+        shell: pwsh
+        run: |
+          $exe = Join-Path $env:GITHUB_WORKSPACE 'chuan-hoa-ho-so-v1.0.1\dist\ChuanHoaHoSoDangVien_v1.0.1.exe'
+          $p = Start-Process -FilePath $exe -PassThru
+          Start-Sleep -Seconds 6
+          if ($p.HasExited) { throw "UI process exited unexpectedly during smoke test. Exit=$($p.ExitCode)" }
+          Stop-Process -Id $p.Id -Force
+
+      - name: Create checksum and Windows test report
+        shell: pwsh
+        run: |
+          $base = Join-Path $env:GITHUB_WORKSPACE 'chuan-hoa-ho-so-v1.0.1'
+          $dist = Join-Path $base 'dist'
+          $exe = Join-Path $dist 'ChuanHoaHoSoDangVien_v1.0.1.exe'
+          $hash = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  ChuanHoaHoSoDangVien_v1.0.1.exe" | Set-Content -LiteralPath (Join-Path $dist 'SHA256.txt') -Encoding ASCII
+          $size = (Get-Item $exe).Length
+          @"
+          CHUAN HOA HO SO DANG VIEN v1.0.1 - WINDOWS BUILD REPORT
+          Build UTC: $([DateTime]::UtcNow.ToString('o'))
+          Runner: windows-latest
+          Windows PowerShell parser: PASS
+          Core/branch tests: 21/21 PASS
+          Real PowerShell extended integration self-test: PASS
+          Compiled EXE extended self-test: PASS
+          WPF startup smoke test: PASS
+          Source SHA-256: $env:SOURCE_SHA256
+          EXE SHA-256: $hash
+          EXE bytes: $size
+          PS2EXE: 1.0.18 pinned
+          Note: executable is not code-signed; SmartScreen/antivirus may warn on first run.
+          "@ | Set-Content -LiteralPath (Join-Path $dist 'BUILD_REPORT.txt') -Encoding UTF8
+          Compress-Archive -Path $exe,(Join-Path $dist 'SHA256.txt'),(Join-Path $dist 'BUILD_REPORT.txt') -DestinationPath (Join-Path $dist 'ChuanHoaHoSoDangVien_v1.0.1_Windows.zip') -Force
+
+      - name: Upload release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ChuanHoaHoSoDangVien-v1.0.1-Windows
+          path: chuan-hoa-ho-so-v1.0.1/dist/*
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Commit verified release to build branch
+        shell: bash
+        run: |
+          set -e
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add chuan-hoa-ho-so-v1.0.1/dist
+          if git diff --cached --quiet; then
+            echo "No release changes to commit."
+          else
+            git commit -m "build: verified Windows EXE v1.0.1"
+            git push origin HEAD:build/chuan-hoa-ho-so-v1.0.1-20260914
+          fi
