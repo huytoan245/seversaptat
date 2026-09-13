@@ -60,6 +60,8 @@ jobs:
 
           $text = [IO.File]::ReadAllText($src, [Text.Encoding]::UTF8)
           $text = [regex]::Replace($text, '(?m)^\s*Write-Output "SELFTEST_OK v\$\(\$script:AppVersion\)"\r?\n', '')
+          # Windows PowerShell 5.1 needs System.IO.Compression explicitly for ZipArchive used by XLSX self-test.
+          $text = $text.Replace('Add-Type -AssemblyName System.IO.Compression.FileSystem', "Add-Type -AssemblyName System.IO.Compression`nAdd-Type -AssemblyName System.IO.Compression.FileSystem")
           [IO.File]::WriteAllText($src, $text, [Text.UTF8Encoding]::new($true))
 
           $testB64 = (Get-Content (Join-Path $base 'test_core.py.gz.b64') -Raw).Trim()
@@ -68,7 +70,7 @@ jobs:
 
           $sourceHash = (Get-FileHash $src -Algorithm SHA256).Hash.ToLowerInvariant()
           $testHash = (Get-FileHash $test -Algorithm SHA256).Hash.ToLowerInvariant()
-          if ($sourceHash -ne 'd242df85c4ef2376b1141ea5cdabb17484c91b06c9becadad6c9c0cd9ec60b23') { throw "Source hash mismatch: $sourceHash" }
+          if ($sourceHash -ne '865f7795bab7e40db8a53e1dce4ef58b1fcdd00b299a4acaa403f561bce59505') { throw "Source hash mismatch: $sourceHash" }
           if ($testHash -ne '8fe8cbfae3ca579d397a5d15aa94f0973e3ab559a8bc374a45fa70bdceb64ca9') { throw "Test hash mismatch: $testHash" }
           "SOURCE_SHA256=$sourceHash" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
