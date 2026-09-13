@@ -45,8 +45,6 @@ jobs:
             finally { $output.Dispose(); $gzip.Dispose(); $input.Dispose() }
           }
 
-          # chunk_01 in src_final was damaged by one byte during the first upload.
-          # Reconstruct from two exact 3000-character patch chunks instead.
           $sourceFiles = @(
             (Join-Path $base 'src_final\chunk_00.txt'),
             (Join-Path $base 'src_patch\chunk_01a.txt'),
@@ -60,10 +58,11 @@ jobs:
           $src = Join-Path $base 'work\ChuanHoaHoSoDangVien.ps1'
           Expand-GzipBase64 $sourceB64 $src
 
-          # Release build: SelfTestOnly must be silent so a no-console EXE cannot show an output dialog.
+          # Silent self-test for no-console EXE, then write UTF-8 WITH BOM.
+          # Windows PowerShell 5.1 requires the BOM to parse Vietnamese source text reliably.
           $text = [IO.File]::ReadAllText($src, [Text.Encoding]::UTF8)
           $text = [regex]::Replace($text, '(?m)^\s*Write-Output "SELFTEST_OK v\$\(\$script:AppVersion\)"\r?\n', '')
-          [IO.File]::WriteAllText($src, $text, [Text.UTF8Encoding]::new($false))
+          [IO.File]::WriteAllText($src, $text, [Text.UTF8Encoding]::new($true))
 
           $testB64 = (Get-Content (Join-Path $base 'test_core.py.gz.b64') -Raw).Trim()
           $test = Join-Path $base 'work\test_core.py'
@@ -71,7 +70,7 @@ jobs:
 
           $sourceHash = (Get-FileHash $src -Algorithm SHA256).Hash.ToLowerInvariant()
           $testHash = (Get-FileHash $test -Algorithm SHA256).Hash.ToLowerInvariant()
-          if ($sourceHash -ne 'c797b3b6b3414210a62da7e2ecf7ca6a2e4bd6b5fa689cfb512ecd399b36f8ec') { throw "Source hash mismatch: $sourceHash" }
+          if ($sourceHash -ne 'd242df85c4ef2376b1141ea5cdabb17484c91b06c9becadad6c9c0cd9ec60b23') { throw "Source hash mismatch: $sourceHash" }
           if ($testHash -ne '8fe8cbfae3ca579d397a5d15aa94f0973e3ab559a8bc374a45fa70bdceb64ca9') { throw "Test hash mismatch: $testHash" }
           "SOURCE_SHA256=$sourceHash" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
