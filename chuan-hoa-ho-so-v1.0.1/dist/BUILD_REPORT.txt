@@ -1,0 +1,13 @@
+CHUAN HOA HO SO DANG VIEN v1.0.1 - WINDOWS BUILD REPORT
+Build UTC: 2026-09-13T17:37:52.1609530Z
+Runner: windows-latest
+Windows PowerShell parser: PASS
+Core/branch tests: 21/21 PASS
+Real PowerShell extended integration self-test: PASS
+Compiled EXE extended self-test: PASS
+WPF startup smoke test: PASS
+Source SHA-256: 865f7795bab7e40db8a53e1dce4ef58b1fcdd00b299a4acaa403f561bce59505
+EXE SHA-256: 265701aa951a49bffeb4dfc453974fc1f107d1b508347087396471a9f3945bc1
+EXE bytes: 119808
+PS2EXE: 1.0.18 pinned
+Note: executable is not code-signed; SmartScreen/antivirus may warn on first run.
