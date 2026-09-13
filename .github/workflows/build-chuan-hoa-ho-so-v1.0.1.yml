@@ -6,6 +6,7 @@ on:
       - build/chuan-hoa-ho-so-v1.0.1-20260914
     paths:
       - 'chuan-hoa-ho-so-v1.0.1/src_final/**'
+      - 'chuan-hoa-ho-so-v1.0.1/src_patch/**'
       - 'chuan-hoa-ho-so-v1.0.1/test_core.py.gz.b64'
       - '.github/workflows/build-chuan-hoa-ho-so-v1.0.1.yml'
   workflow_dispatch:
@@ -44,9 +45,18 @@ jobs:
             finally { $output.Dispose(); $gzip.Dispose(); $input.Dispose() }
           }
 
-          $parts = Get-ChildItem (Join-Path $base 'src_final') -Filter 'chunk_*.txt' | Sort-Object Name
-          if ($parts.Count -ne 5) { throw "Expected 5 source chunks, got $($parts.Count)" }
-          $sourceB64 = ($parts | ForEach-Object { (Get-Content $_.FullName -Raw).Trim() }) -join ''
+          # chunk_01 in src_final was damaged by one byte during the first upload.
+          # Reconstruct from two exact 3000-character patch chunks instead.
+          $sourceFiles = @(
+            (Join-Path $base 'src_final\chunk_00.txt'),
+            (Join-Path $base 'src_patch\chunk_01a.txt'),
+            (Join-Path $base 'src_patch\chunk_01b.txt'),
+            (Join-Path $base 'src_final\chunk_02.txt'),
+            (Join-Path $base 'src_final\chunk_03.txt'),
+            (Join-Path $base 'src_final\chunk_04.txt')
+          )
+          foreach ($f in $sourceFiles) { if (-not (Test-Path -LiteralPath $f -PathType Leaf)) { throw "Missing source chunk: $f" } }
+          $sourceB64 = ($sourceFiles | ForEach-Object { (Get-Content $_ -Raw).Trim() }) -join ''
           $src = Join-Path $base 'work\ChuanHoaHoSoDangVien.ps1'
           Expand-GzipBase64 $sourceB64 $src
 
