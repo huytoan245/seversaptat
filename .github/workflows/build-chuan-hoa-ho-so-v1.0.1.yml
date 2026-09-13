@@ -58,8 +58,6 @@ jobs:
           $src = Join-Path $base 'work\ChuanHoaHoSoDangVien.ps1'
           Expand-GzipBase64 $sourceB64 $src
 
-          # Silent self-test for no-console EXE, then write UTF-8 WITH BOM.
-          # Windows PowerShell 5.1 requires the BOM to parse Vietnamese source text reliably.
           $text = [IO.File]::ReadAllText($src, [Text.Encoding]::UTF8)
           $text = [regex]::Replace($text, '(?m)^\s*Write-Output "SELFTEST_OK v\$\(\$script:AppVersion\)"\r?\n', '')
           [IO.File]::WriteAllText($src, $text, [Text.UTF8Encoding]::new($true))
@@ -97,6 +95,8 @@ jobs:
       - name: Run 21 core logic and branch safety tests
         shell: pwsh
         run: |
+          $env:PYTHONIOENCODING='utf-8'
+          $env:PYTHONUTF8='1'
           $test = Join-Path $env:GITHUB_WORKSPACE 'chuan-hoa-ho-so-v1.0.1\work\test_core.py'
           python $test
           if ($LASTEXITCODE -ne 0) { throw "Python core tests failed: $LASTEXITCODE" }
