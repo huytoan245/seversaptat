@@ -1,0 +1,276 @@
+name: Build Doi ten - Nen file PDF v4.1.0 Offline
+
+on:
+  push:
+    branches:
+      - build/doi-ten-nen-pdf-v4.1.0-offline-20260914
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-offline:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        shell: pwsh
+
+    steps:
+      - name: Checkout isolated build branch
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+          cache: false
+
+      - name: Restore verified source payload
+        working-directory: tools/doi-ten-nen-pdf
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $b64 = (Get-Content -Raw 'main.go.gz.b64').Trim()
+          $gzBytes = [Convert]::FromBase64String($b64)
+          $ms = New-Object System.IO.MemoryStream(,$gzBytes)
+          $gz = New-Object System.IO.Compression.GZipStream($ms, [System.IO.Compression.CompressionMode]::Decompress)
+          $out = [System.IO.File]::Create((Join-Path $PWD 'main.go'))
+          $gz.CopyTo($out)
+          $out.Close(); $gz.Close(); $ms.Close()
+          if (-not (Test-Path 'main.go')) { throw 'Source restore failed' }
+          $hash = (Get-FileHash -Algorithm SHA256 'main.go').Hash.ToLowerInvariant()
+          if ($hash -ne '1cadc37626f8ad1671b713471912882c8e87c02ef54e11447ff35c744e0de8c9') {
+            throw "Source checksum mismatch: $hash"
+          }
+          @'
+          module doiten-nen-pdf
+
+          go 1.23
+          '@ | Set-Content -Path 'go.mod' -Encoding ascii
+
+      - name: Download and stage official Ghostscript 10.08.0
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $src = Join-Path $PWD 'tools\doi-ten-nen-pdf'
+          $dist = Join-Path $src 'dist'
+          $engine = Join-Path $dist 'engine\ghostscript-10.08.0'
+          New-Item -ItemType Directory -Force -Path $engine | Out-Null
+
+          $installer = Join-Path $env:RUNNER_TEMP 'gs10080w64.exe'
+          $url = 'https://github.com/ArtifexSoftware/ghostpdl-downloads/releases/download/gs10080/gs10080w64.exe'
+          $expected = '52a91b8bf09298788d7a57b9206127026c23eacd75405f0a131e26dc381dce50'
+
+          Invoke-WebRequest -Uri $url -OutFile $installer -UseBasicParsing
+          $actual = (Get-FileHash -Algorithm SHA256 $installer).Hash.ToLowerInvariant()
+          if ($actual -ne $expected) {
+            throw "Ghostscript checksum mismatch. Expected $expected but got $actual"
+          }
+
+          $proc = Start-Process -FilePath $installer -ArgumentList @('/S', "/D=$engine") -Wait -PassThru
+          if ($proc.ExitCode -ne 0) {
+            throw "Ghostscript installer failed with exit code $($proc.ExitCode)"
+          }
+
+          $gs = Get-ChildItem -Path $engine -Recurse -File -Filter 'gswin64c.exe' | Select-Object -First 1
+          if (-not $gs) { throw 'gswin64c.exe was not found in staged offline engine' }
+          Write-Host "Bundled Ghostscript: $($gs.FullName)"
+          & $gs.FullName --version
+          if ($LASTEXITCODE -ne 0) { throw 'Bundled Ghostscript --version failed' }
+
+      - name: Generate modern PDF icon and Windows manifest
+        working-directory: tools/doi-ten-nen-pdf
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Add-Type -AssemblyName System.Drawing
+
+          $size = 256
+          $bmp = New-Object System.Drawing.Bitmap($size, $size)
+          $g = [System.Drawing.Graphics]::FromImage($bmp)
+          $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
+          $g.TextRenderingHint = [System.Drawing.Text.TextRenderingHint]::AntiAliasGridFit
+          $g.Clear([System.Drawing.Color]::Transparent)
+
+          $tile = New-Object System.Drawing.Drawing2D.GraphicsPath
+          $r = 42
+          $tile.AddArc(8, 8, $r, $r, 180, 90)
+          $tile.AddArc(248-$r, 8, $r, $r, 270, 90)
+          $tile.AddArc(248-$r, 248-$r, $r, $r, 0, 90)
+          $tile.AddArc(8, 248-$r, $r, $r, 90, 90)
+          $tile.CloseFigure()
+          $navy = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(25, 47, 76))
+          $g.FillPath($navy, $tile)
+
+          $doc = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(250,250,250))
+          $g.FillRectangle($doc, 52, 34, 132, 176)
+          $fold = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(220,227,235))
+          $pts = [System.Drawing.Point[]]@((New-Object System.Drawing.Point(150,34)),(New-Object System.Drawing.Point(184,68)),(New-Object System.Drawing.Point(150,68)))
+          $g.FillPolygon($fold, $pts)
+          $red = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(224, 56, 64))
+          $g.FillRectangle($red, 38, 100, 158, 61)
+          $font = New-Object System.Drawing.Font('Segoe UI', 31, [System.Drawing.FontStyle]::Bold, [System.Drawing.GraphicsUnit]::Pixel)
+          $white = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::White)
+          $sf = New-Object System.Drawing.StringFormat
+          $sf.Alignment = [System.Drawing.StringAlignment]::Center
+          $sf.LineAlignment = [System.Drawing.StringAlignment]::Center
+          $g.DrawString('PDF', $font, $white, (New-Object System.Drawing.RectangleF(38,100,158,61)), $sf)
+
+          $bluePen = New-Object System.Drawing.Pen([System.Drawing.Color]::FromArgb(83, 176, 255), 12)
+          $bluePen.StartCap = [System.Drawing.Drawing2D.LineCap]::Round
+          $bluePen.EndCap = [System.Drawing.Drawing2D.LineCap]::Round
+          $g.DrawLine($bluePen, 94, 192, 119, 217)
+          $g.DrawLine($bluePen, 144, 192, 119, 217)
+          $g.DrawLine($bluePen, 119, 217, 119, 179)
+
+          $png = Join-Path $PWD 'app-icon.png'
+          $bmp.Save($png, [System.Drawing.Imaging.ImageFormat]::Png)
+          $g.Dispose(); $bmp.Dispose()
+
+          $pngBytes = [System.IO.File]::ReadAllBytes($png)
+          $ico = Join-Path $PWD 'app.ico'
+          $fs = [System.IO.File]::Create($ico)
+          $bw = New-Object System.IO.BinaryWriter($fs)
+          $bw.Write([UInt16]0); $bw.Write([UInt16]1); $bw.Write([UInt16]1)
+          $bw.Write([Byte]0); $bw.Write([Byte]0); $bw.Write([Byte]0); $bw.Write([Byte]0)
+          $bw.Write([UInt16]1); $bw.Write([UInt16]32)
+          $bw.Write([UInt32]$pngBytes.Length); $bw.Write([UInt32]22)
+          $bw.Write([byte[]]$pngBytes)
+          $bw.Close(); $fs.Close()
+
+          @'
+          <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+          <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+            <assemblyIdentity version="4.1.0.0" processorArchitecture="amd64" name="NguyenHuyToan.DoiTenNenPDF" type="win32"/>
+            <description>Đổi tên - Nén file PDF</description>
+            <dependency>
+              <dependentAssembly>
+                <assemblyIdentity type="win32" name="Microsoft.Windows.Common-Controls" version="6.0.0.0" processorArchitecture="*" publicKeyToken="6595b64144ccf1df" language="*"/>
+              </dependentAssembly>
+            </dependency>
+            <application xmlns="urn:schemas-microsoft-com:asm.v3">
+              <windowsSettings>
+                <dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true/pm</dpiAware>
+                <dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">PerMonitorV2</dpiAwareness>
+                <longPathAware xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">true</longPathAware>
+              </windowsSettings>
+            </application>
+          </assembly>
+          '@ | Set-Content -Path 'app.manifest' -Encoding UTF8
+
+          go install github.com/akavel/rsrc@latest
+          $rsrc = Join-Path (go env GOPATH) 'bin\rsrc.exe'
+          & $rsrc -ico app.ico -manifest app.manifest -o rsrc_windows_amd64.syso
+          if ($LASTEXITCODE -ne 0) { throw 'rsrc failed' }
+
+      - name: Static checks and build
+        working-directory: tools/doi-ten-nen-pdf
+        run: |
+          $ErrorActionPreference = 'Stop'
+          gofmt -w main.go
+          go vet ./...
+          if ($LASTEXITCODE -ne 0) { throw 'go vet failed' }
+
+          $dist = Join-Path $PWD 'dist'
+          $self = Join-Path $dist 'selftest.exe'
+          go build -trimpath -o $self .
+          if ($LASTEXITCODE -ne 0) { throw 'self-test build failed' }
+
+          $p = Start-Process -FilePath $self -ArgumentList '--self-test' -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "offline self-test failed with exit code $($p.ExitCode)" }
+          Remove-Item -Force $self
+
+          $app = Join-Path $dist 'Doi-ten-Nen-file-PDF-v4.1.0.exe'
+          go build -trimpath -ldflags='-s -w -H=windowsgui' -o $app .
+          if ($LASTEXITCODE -ne 0) { throw 'final Windows GUI build failed' }
+
+          $p2 = Start-Process -FilePath $app -ArgumentList '--self-test' -Wait -PassThru
+          if ($p2.ExitCode -ne 0) { throw "final binary offline self-test failed with exit code $($p2.ExitCode)" }
+
+      - name: Add offline usage and licensing information
+        working-directory: tools/doi-ten-nen-pdf
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $dist = Join-Path $PWD 'dist'
+          @'
+          ĐỔI TÊN - NÉN FILE PDF v4.1.0 OFFLINE PORTABLE
+          =================================================
+
+          Thiết kế bởi Nguyễn Huy Toàn
+          Văn phòng Đảng ủy xã Thanh Lâm • 0979928450
+
+          CÁCH DÙNG
+          1. Giải nén TOÀN BỘ gói ZIP vào một thư mục.
+          2. Chạy Doi-ten-Nen-file-PDF-v4.1.0.exe.
+          3. Không tách riêng file EXE khỏi thư mục engine.
+          4. Chức năng nén chạy OFFLINE 100%, không tải thêm dữ liệu từ Internet.
+
+          AUTO:
+          - Chọn thư mục, bấm BẮT ĐẦU NÉN.
+          - Quét toàn bộ thư mục con bằng metadata.
+          - PDF dưới 20 MB được bỏ qua mà không mở nội dung.
+          - PDF từ 20 MB được thử 250 -> 220 -> 200 DPI, dừng ngay khi đạt ngưỡng an toàn.
+
+          THỦ CÔNG:
+          - Có thể chọn thư mục hoặc nhiều file riêng lẻ.
+          - Cho phép 300 / 250 / 220 / 200 DPI, kể cả file dưới 20 MB.
+
+          AN TOÀN DỮ LIỆU:
+          - Chỉ thay file gốc sau khi bản nén mới hợp lệ và số trang không thay đổi.
+          - File tạm được xóa sau xử lý.
+          - PDF có dấu hiệu chữ ký số hoặc mã hóa được bỏ qua.
+          '@ | Set-Content -Path (Join-Path $dist 'HUONG-DAN.txt') -Encoding UTF8
+
+          @'
+          THÔNG TIN BỘ NÉN PDF TÍCH HỢP
+          =================================
+          Engine: Artifex Ghostscript 10.08.0, Windows x64
+          Nguồn chính thức: https://github.com/ArtifexSoftware/ghostpdl-downloads/releases/tag/gs10080
+          Installer chính thức: gs10080w64.exe
+          SHA-256 installer: 52a91b8bf09298788d7a57b9206127026c23eacd75405f0a131e26dc381dce50
+          Giấy phép Ghostscript: GNU Affero General Public License (AGPL) hoặc giấy phép thương mại từ Artifex.
+          Thông tin giấy phép: https://www.ghostscript.com/licensing/
+          Mã nguồn Ghostscript tương ứng có tại trang phát hành/chính thức của Artifex.
+
+          Ứng dụng gọi Ghostscript như một tiến trình riêng và không sửa đổi binary Ghostscript.
+          '@ | Set-Content -Path (Join-Path $dist 'THONG-TIN-GHOSTSCRIPT.txt') -Encoding UTF8
+
+          $engine = Join-Path $dist 'engine\ghostscript-10.08.0'
+          $legal = Join-Path $dist 'engine\LEGAL'
+          New-Item -ItemType Directory -Force -Path $legal | Out-Null
+          Get-ChildItem -Path $engine -Recurse -File | Where-Object {
+            $_.Name -match '^(COPYING|LICENSE|AGPL|NOTICE|README|doc)' -or $_.FullName -match '\\doc\\'
+          } | ForEach-Object {
+            $dest = Join-Path $legal $_.Name
+            if (-not (Test-Path $dest)) { Copy-Item $_.FullName $dest -Force }
+          }
+
+          $app = Join-Path $dist 'Doi-ten-Nen-file-PDF-v4.1.0.exe'
+          $gs = Get-ChildItem -Path $engine -Recurse -File -Filter 'gswin64c.exe' | Select-Object -First 1
+          $appHash = (Get-FileHash -Algorithm SHA256 $app).Hash.ToLowerInvariant()
+          $gsHash = (Get-FileHash -Algorithm SHA256 $gs.FullName).Hash.ToLowerInvariant()
+          @"
+          SHA-256
+          Doi-ten-Nen-file-PDF-v4.1.0.exe  $appHash
+          $($gs.Name)  $gsHash
+          "@ | Set-Content -Path (Join-Path $dist 'CHECKSUMS.txt') -Encoding UTF8
+
+      - name: Verify portable package layout
+        working-directory: tools/doi-ten-nen-pdf
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $dist = Join-Path $PWD 'dist'
+          $app = Join-Path $dist 'Doi-ten-Nen-file-PDF-v4.1.0.exe'
+          $gs = Get-ChildItem -Path (Join-Path $dist 'engine') -Recurse -File -Filter 'gswin64c.exe' | Select-Object -First 1
+          if (-not (Test-Path $app)) { throw 'App EXE missing' }
+          if (-not $gs) { throw 'Bundled engine missing' }
+          $totalBytes = (Get-ChildItem -Path $dist -Recurse -File | Measure-Object -Property Length -Sum).Sum
+          Write-Host ("Portable package size: {0:N1} MB" -f ($totalBytes / 1MB))
+
+      - name: Upload offline portable build
+        uses: actions/upload-artifact@v4
+        with:
+          name: Doi-ten-Nen-file-PDF-v4.1.0-OFFLINE-PORTABLE
+          path: tools/doi-ten-nen-pdf/dist/**
+          if-no-files-found: error
+          compression-level: 6
+          retention-days: 30
