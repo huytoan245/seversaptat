@@ -1,0 +1,359 @@
+name: Build Duoi duoi PDF va Nen file PDF v4.3.0
+
+on:
+  push:
+    branches:
+      - build/duoi-duoi-pdf-va-nen-file-pdf-v4.3.0-20260914
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 35
+    defaults:
+      run:
+        shell: pwsh
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+          cache: false
+
+      - name: Restore source and apply v4.3.0 AUTO quality-first logic
+        working-directory: tools/doi-ten-nen-pdf
+        run: |
+          $ErrorActionPreference='Stop'
+          $b64=(Get-Content -Raw 'main.go.gz.b64').Trim()
+          $bytes=[Convert]::FromBase64String($b64)
+          $ms=[IO.MemoryStream]::new($bytes)
+          $gz=[IO.Compression.GZipStream]::new($ms,[IO.Compression.CompressionMode]::Decompress)
+          $out=[IO.File]::Create((Join-Path $PWD 'main.go'))
+          $gz.CopyTo($out);$out.Dispose();$gz.Dispose();$ms.Dispose()
+
+          $src=Get-Content -Raw main.go
+          $src=$src.Replace('ĐỔI TÊN - NÉN FILE PDF','ĐUỔI ĐUÔI PDF VÀ NÉN FILE PDF')
+          $src=$src.Replace('Đổi tên - Nén file PDF','Đuổi đuôi PDF và Nén file PDF')
+          foreach($old in @('v4.0.1','v4.0.2','v4.1.0','v4.2.0','v4.2.1')){$src=$src.Replace($old,'v4.3.0')}
+          $src=$src.Replace('AUTO là mặc định: chọn thư mục → BẮT ĐẦU NÉN. Chỉ AUTO mới bỏ qua file dưới 20 MB.','AUTO mặc định: ưu tiên độ nét • mục tiêu 18–19 MB • file cứng đầu tự hạ dần nhưng vẫn giữ an toàn.')
+
+          $newAuto=@'
+          func compressAuto(ctx context.Context, gs, path string) compressionResult {
+          	// v4.3.0: quality-first AUTO. We do not chase the smallest file.
+          	// Start at 300 DPI / very high JPEG quality, then step down only as needed.
+          	// Monochrome content remains at >=300 DPI inside runGhostscript, preserving text edges.
+          	type autoProfile struct {
+          		dpi     int
+          		quality int
+          		label   string
+          	}
+          	profiles := []autoProfile{
+          		{300, 97, "ưu tiên chất lượng tối đa"},
+          		{300, 94, "300 DPI chất lượng cao"},
+          		{280, 94, "280 DPI chất lượng cao"},
+          		{260, 92, "260 DPI cân bằng"},
+          		{240, 90, "240 DPI cân bằng"},
+          		{220, 88, "220 DPI cân bằng"},
+          		{200, 85, "200 DPI an toàn"},
+          		{190, 82, "190 DPI file cứng đầu"},
+          		{180, 79, "180 DPI file cứng đầu"},
+          		{170, 76, "170 DPI dự phòng"},
+          		{160, 74, "160 DPI dự phòng"},
+          		{150, 72, "150 DPI cuối cùng"},
+          	}
+          	// 18.8 MiB = 19,713,228 bytes: safely below both 20 MiB and 20,000,000-byte limits.
+          	const safeLimit = int64(188 * 1024 * 1024 / 10)
+          	origPages := pdfPageCount(ctx, gs, path)
+          	orig, err := os.Stat(path)
+          	if err != nil {
+          		return compressionResult{Err: err}
+          	}
+          	var bestSize int64
+          	var bestProfile autoProfile
+          	for _, p := range profiles {
+          		if ctx.Err() != nil {
+          			return compressionResult{Err: ctx.Err()}
+          		}
+          		tmp, err := tempPDFPath(path)
+          		if err != nil {
+          			return compressionResult{Err: err}
+          		}
+          		size, err := runGhostscript(ctx, gs, path, tmp, p.dpi, p.quality)
+          		if err != nil {
+          			_ = os.Remove(tmp)
+          			if errors.Is(err, context.Canceled) {
+          				return compressionResult{Err: err}
+          			}
+          			continue
+          		}
+          		if !validPDF(tmp) {
+          			_ = os.Remove(tmp)
+          			continue
+          		}
+          		if outPages := pdfPageCount(ctx, gs, tmp); origPages > 0 && outPages > 0 && outPages != origPages {
+          			_ = os.Remove(tmp)
+          			return compressionResult{Err: fmt.Errorf("số trang thay đổi sau nén: %d → %d; đã giữ nguyên file gốc", origPages, outPages)}
+          		}
+          		if bestSize == 0 || size < bestSize {
+          			bestSize = size
+          			bestProfile = p
+          		}
+          		if size >= orig.Size() {
+          			_ = os.Remove(tmp)
+          			continue
+          		}
+          		if size <= safeLimit {
+          			if err := replaceOriginal(path, tmp); err != nil {
+          				_ = os.Remove(tmp)
+          				return compressionResult{Err: err}
+          			}
+          			return compressionResult{Replaced: true, NewSize: size, Note: fmt.Sprintf("AUTO %d DPI • Q%d • %s", p.dpi, p.quality, p.label)}
+          		}
+          		_ = os.Remove(tmp)
+          	}
+          	if bestSize > 0 {
+          		return compressionResult{Err: fmt.Errorf("đã thử tới %d DPI/Q%d nhưng file vẫn %.2f MB; giữ nguyên file gốc để tránh làm hỏng tài liệu", bestProfile.dpi, bestProfile.quality, mb(bestSize))}
+          	}
+          	return compressionResult{Err: errors.New("không tạo được bản PDF tối ưu hợp lệ")}
+          }
+
+          func compressAtDPI
+          '@
+          $pattern='(?s)func compressAuto\(ctx context\.Context, gs, path string\) compressionResult \{.*?\r?\n\}\r?\nfunc compressAtDPI'
+          $patched=[regex]::Replace($src,$pattern,$newAuto,1)
+          if($patched -eq $src){throw 'compressAuto patch did not match source'}
+          Set-Content main.go $patched -Encoding utf8
+          "module duoi-duoi-pdf-nen-file-pdf`n`ngo 1.23`n" | Set-Content go.mod -Encoding ascii
+          gofmt -w main.go
+
+      - name: Stage Ghostscript 10.08.0 offline engine
+        working-directory: tools/doi-ten-nen-pdf
+        run: |
+          $ErrorActionPreference='Stop'
+          $installer=Join-Path $env:RUNNER_TEMP 'gs10080w64.exe'
+          $url='https://github.com/ArtifexSoftware/ghostpdl-downloads/releases/download/gs10080/gs10080w64.exe'
+          $expected='52a91b8bf09298788d7a57b9206127026c23eacd75405f0a131e26dc381dce50'
+          Invoke-WebRequest -Uri $url -OutFile $installer -UseBasicParsing
+          $actual=(Get-FileHash $installer -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($actual -ne $expected){throw "Ghostscript checksum mismatch: $actual"}
+          $extract=Join-Path $env:RUNNER_TEMP 'gs-v430'
+          Remove-Item $extract -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force $extract|Out-Null
+          $seven=(Get-Command 7z.exe -ErrorAction SilentlyContinue).Source
+          if(-not $seven){$seven='C:\Program Files\7-Zip\7z.exe'}
+          & $seven x $installer "-o$extract" -y | Out-Host
+          if($LASTEXITCODE -ne 0){throw 'Ghostscript extraction failed'}
+          $gs=Get-ChildItem $extract -Recurse -File -Filter gswin64c.exe|Select-Object -First 1
+          if(-not $gs){throw 'gswin64c.exe missing'}
+          $root=Split-Path (Split-Path $gs.FullName -Parent) -Parent
+          $engine=Join-Path $PWD 'payload\engine\ghostscript-10.08.0'
+          New-Item -ItemType Directory -Force $engine|Out-Null
+          Copy-Item (Join-Path $root '*') $engine -Recurse -Force
+          $bundled=Get-ChildItem $engine -Recurse -File -Filter gswin64c.exe|Select-Object -First 1
+          & $bundled.FullName --version
+          if($LASTEXITCODE -ne 0){throw 'bundled Ghostscript cannot start'}
+
+      - name: Create modern icon and Windows resources
+        working-directory: tools/doi-ten-nen-pdf
+        run: |
+          $ErrorActionPreference='Stop'
+          Add-Type -AssemblyName System.Drawing
+          $s=256;$bmp=[Drawing.Bitmap]::new($s,$s);$g=[Drawing.Graphics]::FromImage($bmp)
+          $g.SmoothingMode=[Drawing.Drawing2D.SmoothingMode]::AntiAlias;$g.Clear([Drawing.Color]::Transparent)
+          $navy=[Drawing.SolidBrush]::new([Drawing.Color]::FromArgb(24,46,76));$g.FillEllipse($navy,8,8,240,240)
+          $page=[Drawing.SolidBrush]::new([Drawing.Color]::FromArgb(250,250,252));$g.FillRectangle($page,54,34,148,178)
+          $red=[Drawing.SolidBrush]::new([Drawing.Color]::FromArgb(226,53,64));$g.FillRectangle($red,38,96,180,62)
+          $font=[Drawing.Font]::new('Segoe UI',32,[Drawing.FontStyle]::Bold,[Drawing.GraphicsUnit]::Pixel);$white=[Drawing.SolidBrush]::new([Drawing.Color]::White)
+          $sf=[Drawing.StringFormat]::new();$sf.Alignment='Center';$sf.LineAlignment='Center';$g.DrawString('PDF',$font,$white,[Drawing.RectangleF]::new(38,96,180,62),$sf)
+          $cyan=[Drawing.Pen]::new([Drawing.Color]::FromArgb(55,190,220),10);$cyan.StartCap='Round';$cyan.EndCap='Round'
+          $g.DrawArc($cyan,82,166,92,54,8,164);$g.DrawLine($cyan,91,198,112,218);$g.DrawLine($cyan,91,198,118,196)
+          $png=Join-Path $PWD 'app-icon-v430.png';$bmp.Save($png,[Drawing.Imaging.ImageFormat]::Png);$g.Dispose();$bmp.Dispose()
+          $pb=[IO.File]::ReadAllBytes($png);$ico=Join-Path $PWD 'app.ico';$fs=[IO.File]::Create($ico);$bw=[IO.BinaryWriter]::new($fs)
+          $bw.Write([UInt16]0);$bw.Write([UInt16]1);$bw.Write([UInt16]1);$bw.Write([Byte]0);$bw.Write([Byte]0);$bw.Write([Byte]0);$bw.Write([Byte]0);$bw.Write([UInt16]1);$bw.Write([UInt16]32);$bw.Write([UInt32]$pb.Length);$bw.Write([UInt32]22);$bw.Write([byte[]]$pb);$bw.Dispose();$fs.Dispose()
+          @'
+          <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+          <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+            <assemblyIdentity version="4.3.0.0" processorArchitecture="amd64" name="NguyenHuyToan.DuoiDuoiPDFNenFilePDF" type="win32"/>
+            <description>Đuổi đuôi PDF và Nén file PDF</description>
+            <dependency><dependentAssembly><assemblyIdentity type="win32" name="Microsoft.Windows.Common-Controls" version="6.0.0.0" processorArchitecture="*" publicKeyToken="6595b64144ccf1df" language="*"/></dependentAssembly></dependency>
+            <application xmlns="urn:schemas-microsoft-com:asm.v3"><windowsSettings><dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true/pm</dpiAware><dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">PerMonitorV2</dpiAwareness><longPathAware xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">true</longPathAware></windowsSettings></application>
+          </assembly>
+          '@ | Set-Content app.manifest -Encoding utf8
+          go install github.com/akavel/rsrc@latest
+          $rsrc=Join-Path (go env GOPATH) 'bin\rsrc.exe'
+          & $rsrc -ico app.ico -manifest app.manifest -o rsrc_windows_amd64.syso
+          if($LASTEXITCODE -ne 0){throw 'rsrc failed'}
+
+      - name: Add AUTO regression tests and build core
+        working-directory: tools/doi-ten-nen-pdf
+        run: |
+          $ErrorActionPreference='Stop'
+          @'
+          package main
+
+          import (
+              "bytes"
+              "context"
+              "fmt"
+              "os"
+              "path/filepath"
+              "strings"
+              "testing"
+          )
+
+          func testGS(t *testing.T) string {
+              t.Helper()
+              var found string
+              filepath.WalkDir(filepath.Join("payload", "engine"), func(path string, d os.DirEntry, err error) error {
+                  if err == nil && !d.IsDir() && strings.EqualFold(d.Name(), "gswin64c.exe") { found = path; return filepath.SkipAll }
+                  return nil
+              })
+              if found == "" { t.Fatal("Ghostscript not found") }
+              return found
+          }
+
+          func writeRawImagePDF(path string, w, h int, noisy bool) error {
+              var b bytes.Buffer
+              b.WriteString("%PDF-1.4\n")
+              offsets := make([]int, 6)
+              obj := func(n int, body func()) { offsets[n]=b.Len(); fmt.Fprintf(&b, "%d 0 obj\n", n); body(); b.WriteString("\nendobj\n") }
+              obj(1, func(){ b.WriteString("<< /Type /Catalog /Pages 2 0 R >>") })
+              obj(2, func(){ b.WriteString("<< /Type /Pages /Kids [3 0 R] /Count 1 >>") })
+              obj(3, func(){ b.WriteString("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /XObject << /Im0 4 0 R >> >> /Contents 5 0 R >>") })
+              rawLen := w*h*3
+              offsets[4]=b.Len(); b.WriteString("4 0 obj\n"); fmt.Fprintf(&b,"<< /Type /XObject /Subtype /Image /Width %d /Height %d /ColorSpace /DeviceRGB /BitsPerComponent 8 /Length %d >>\nstream\n",w,h,rawLen)
+              var x uint32=1
+              row := make([]byte,w*3)
+              for y:=0;y<h;y++ {
+                  for i:=0;i<len(row);i++ {
+                      if noisy { x=x*1664525+1013904223; row[i]=byte(x>>24) } else { row[i]=255 }
+                  }
+                  if !noisy && y%90<7 { for i:=0;i<len(row);i+=3 { row[i]=32;row[i+1]=32;row[i+2]=32 } }
+                  b.Write(row)
+              }
+              b.WriteString("\nendstream\nendobj\n")
+              content := "q 612 0 0 792 0 0 cm /Im0 Do Q\n"
+              obj(5, func(){ fmt.Fprintf(&b,"<< /Length %d >>\nstream\n%sendstream",len(content),content) })
+              xref:=b.Len(); b.WriteString("xref\n0 6\n0000000000 65535 f \n")
+              for i:=1;i<=5;i++ { fmt.Fprintf(&b,"%010d 00000 n \n",offsets[i]) }
+              fmt.Fprintf(&b,"trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n",xref)
+              return os.WriteFile(path,b.Bytes(),0644)
+          }
+
+          func TestAutoV430QualityFirstAndHardFallback(t *testing.T) {
+              gs:=testGS(t); ctx:=context.Background(); dir:=t.TempDir()
+              normal:=filepath.Join(dir,"normal.pdf")
+              if err:=writeRawImagePDF(normal,3200,2800,false);err!=nil{t.Fatal(err)}
+              if st,_:=os.Stat(normal);st.Size()<20*1024*1024{t.Fatal("normal test PDF must exceed 20 MB")}
+              r:=compressAuto(ctx,gs,normal);if r.Err!=nil{t.Fatal(r.Err)};if !r.Replaced{t.Fatal("normal PDF not replaced")}
+              if r.NewSize>=20_000_000{t.Fatalf("normal PDF still too large: %d",r.NewSize)}
+              if !strings.Contains(r.Note,"300 DPI") || !strings.Contains(r.Note,"Q97"){t.Fatalf("quality-first profile not used: %s",r.Note)}
+              if !validPDF(normal) || pdfPageCount(ctx,gs,normal)!=1{t.Fatal("normal output invalid")}
+
+              hard:=filepath.Join(dir,"hard.pdf")
+              if err:=writeRawImagePDF(hard,3600,2800,true);err!=nil{t.Fatal(err)}
+              if st,_:=os.Stat(hard);st.Size()<20*1024*1024{t.Fatal("hard test PDF must exceed 20 MB")}
+              r2:=compressAuto(ctx,gs,hard);if r2.Err!=nil{t.Fatal(r2.Err)};if !r2.Replaced{t.Fatal("hard PDF not replaced")}
+              if r2.NewSize>=20_000_000{t.Fatalf("hard PDF still too large: %.2f MB",mb(r2.NewSize))}
+              if !validPDF(hard) || pdfPageCount(ctx,gs,hard)!=1{t.Fatal("hard output invalid")}
+              t.Logf("normal=%s %.2f MB; hard=%s %.2f MB",r.Note,mb(r.NewSize),r2.Note,mb(r2.NewSize))
+          }
+          '@ | Set-Content auto_v430_test.go -Encoding utf8
+          go vet ./...
+          if($LASTEXITCODE -ne 0){throw 'go vet failed'}
+          go test -run TestAutoV430QualityFirstAndHardFallback -v -timeout 12m
+          if($LASTEXITCODE -ne 0){throw 'AUTO regression test failed'}
+          Remove-Item auto_v430_test.go -Force
+          $payload=Join-Path $PWD 'payload'
+          $core=Join-Path $payload 'Duoi-duoi-PDF-va-Nen-file-PDF-core.exe'
+          go build -trimpath -ldflags='-s -w -H=windowsgui' -o $core .
+          if($LASTEXITCODE -ne 0){throw 'core build failed'}
+          $p=Start-Process $core -WorkingDirectory $payload -ArgumentList '--self-test' -Wait -PassThru
+          if($p.ExitCode -ne 0){throw "core self-test failed: $($p.ExitCode)"}
+
+      - name: Build single EXE payload
+        working-directory: tools/doi-ten-nen-pdf
+        run: |
+          $ErrorActionPreference='Stop'
+          $payload=Join-Path $PWD 'payload'
+          @'
+          ĐUỔI ĐUÔI PDF VÀ NÉN FILE PDF v4.3.0
+          Thiết kế bởi Nguyễn Huy Toàn - Văn phòng Đảng ủy xã Thanh Lâm - 0979928450
+
+          AUTO v4.3.0 ưu tiên chất lượng: bắt đầu ở 300 DPI / JPEG Q97 và chỉ hạ dần khi cần.
+          Mục tiêu an toàn: <= 18.8 MiB, dưới cả ngưỡng 20 MiB và 20,000,000 bytes.
+          File cứng đầu có các bước dự phòng tới 150 DPI; file gốc chỉ bị thay sau khi PDF mới hợp lệ và số trang không đổi.
+          PDF có chữ ký số hoặc mã hóa vẫn được bảo vệ và không bị sửa để tránh phá chữ ký/mã hóa.
+          '@ | Set-Content (Join-Path $payload 'HUONG-DAN.txt') -Encoding utf8
+          @'
+          Bộ nén: Artifex Ghostscript 10.08.0 Windows x64, binary chính thức không sửa đổi.
+          License: GNU AGPL hoặc giấy phép thương mại Artifex. https://www.ghostscript.com/licensing/
+          '@ | Set-Content (Join-Path $payload 'THONG-TIN-GHOSTSCRIPT.txt') -Encoding utf8
+          $wrap=Join-Path $PWD 'wrapper-v430';New-Item -ItemType Directory -Force $wrap|Out-Null
+          $zip=Join-Path $wrap 'payload.zip';Remove-Item $zip -Force -ErrorAction SilentlyContinue
+          Compress-Archive -Path (Join-Path $payload '*') -DestinationPath $zip -CompressionLevel Optimal
+          Copy-Item app.ico (Join-Path $wrap 'app.ico') -Force
+          Copy-Item app-icon-v430.png (Join-Path $wrap 'app-icon-v430.png') -Force
+
+      - name: Build single-file offline launcher
+        working-directory: tools/doi-ten-nen-pdf/wrapper-v430
+        run: |
+          $ErrorActionPreference='Stop'
+          @'
+          package main
+          import("archive/zip";"bytes";"crypto/sha256";_ "embed";"encoding/hex";"errors";"fmt";"io";"os";"os/exec";"path/filepath";"strings";"time")
+          //go:embed payload.zip
+          var payload []byte
+          const version="v4.3.0"
+          const coreName="Duoi-duoi-PDF-va-Nen-file-PDF-core.exe"
+          func ph()string{h:=sha256.Sum256(payload);return hex.EncodeToString(h[:])}
+          func root()(string,error){b:=os.Getenv("LOCALAPPDATA");if b==""{var e error;b,e=os.UserCacheDir();if e!=nil{return "",e}};return filepath.Join(b,"DuoiDuoiPDFNenFilePDF",version),nil}
+          func ok(r string)bool{if s,e:=os.Stat(filepath.Join(r,coreName));e!=nil||s.IsDir(){return false};found:=false;filepath.WalkDir(filepath.Join(r,"engine"),func(p string,d os.DirEntry,e error)error{if e==nil&&!d.IsDir()&&strings.EqualFold(d.Name(),"gswin64c.exe"){found=true;return errors.New("found")};return nil});return found}
+          func current(r string)bool{b,e:=os.ReadFile(filepath.Join(r,".payload.sha256"));return e==nil&&strings.TrimSpace(string(b))==ph()&&ok(r)}
+          func extract(stage string)error{zr,e:=zip.NewReader(bytes.NewReader(payload),int64(len(payload)));if e!=nil{return e};base:=filepath.Clean(stage)+string(os.PathSeparator);for _,f:=range zr.File{c:=filepath.Clean(f.Name);if c==".."||filepath.IsAbs(c)||strings.HasPrefix(c,".."+string(os.PathSeparator)){return fmt.Errorf("unsafe path")};dst:=filepath.Join(stage,c);if !strings.HasPrefix(filepath.Clean(dst),filepath.Clean(base[:len(base)-1])){return fmt.Errorf("escape path")};if f.FileInfo().IsDir(){if e=os.MkdirAll(dst,0755);e!=nil{return e};continue};if e=os.MkdirAll(filepath.Dir(dst),0755);e!=nil{return e};rc,e:=f.Open();if e!=nil{return e};o,e:=os.OpenFile(dst,os.O_CREATE|os.O_TRUNC|os.O_WRONLY,0644);if e!=nil{rc.Close();return e};_,ce:=io.Copy(o,rc);oe:=o.Close();rc.Close();if ce!=nil{return ce};if oe!=nil{return oe}};return nil}
+          func ensure(r string)error{if current(r){return nil};if e:=os.MkdirAll(filepath.Dir(r),0755);e!=nil{return e};stage:=fmt.Sprintf("%s.staging-%d",r,os.Getpid());os.RemoveAll(stage);if e:=os.MkdirAll(stage,0755);e!=nil{return e};if e:=extract(stage);e!=nil{os.RemoveAll(stage);return e};if !ok(stage){os.RemoveAll(stage);return errors.New("engine validation failed")};if e:=os.WriteFile(filepath.Join(stage,".payload.sha256"),[]byte(ph()+"\n"),0644);e!=nil{os.RemoveAll(stage);return e};os.RemoveAll(r);return os.Rename(stage,r)}
+          func main(){r,e:=root();if e!=nil{os.Exit(10)};if e=ensure(r);e!=nil{_ = os.MkdirAll(filepath.Dir(r),0755);_ = os.WriteFile(filepath.Join(filepath.Dir(r),"v4.3.0-startup-error.txt"),[]byte(time.Now().Format(time.RFC3339)+" "+e.Error()),0644);os.Exit(11)};cmd:=exec.Command(filepath.Join(r,coreName),os.Args[1:]...);cmd.Dir=r;if e=cmd.Start();e!=nil{os.Exit(12)};self:=len(os.Args)>1&&os.Args[1]=="--self-test";if !self{_ = cmd.Process.Release();return};if e=cmd.Wait();e!=nil{var ee *exec.ExitError;if errors.As(e,&ee){os.Exit(ee.ExitCode())};os.Exit(13)}}
+          '@ | Set-Content main.go -Encoding utf8
+          "module duoiduoi-singleexe`n`ngo 1.23`n"|Set-Content go.mod -Encoding ascii
+          @'
+          <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+          <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0"><assemblyIdentity version="4.3.0.0" processorArchitecture="amd64" name="NguyenHuyToan.DuoiDuoiPDFNenFilePDF.SingleExe" type="win32"/><description>Đuổi đuôi PDF và Nén file PDF v4.3.0</description><dependency><dependentAssembly><assemblyIdentity type="win32" name="Microsoft.Windows.Common-Controls" version="6.0.0.0" processorArchitecture="*" publicKeyToken="6595b64144ccf1df" language="*"/></dependentAssembly></dependency><application xmlns="urn:schemas-microsoft-com:asm.v3"><windowsSettings><dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true/pm</dpiAware><dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">PerMonitorV2</dpiAwareness><longPathAware xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">true</longPathAware></windowsSettings></application></assembly>
+          '@ | Set-Content app.manifest -Encoding utf8
+          go install github.com/akavel/rsrc@latest
+          $rsrc=Join-Path (go env GOPATH) 'bin\rsrc.exe'; & $rsrc -ico app.ico -manifest app.manifest -o rsrc_windows_amd64.syso
+          gofmt -w main.go;go vet ./...;if($LASTEXITCODE -ne 0){throw 'wrapper vet failed'}
+          $out='Duoi-duoi-PDF-va-Nen-file-PDF-v4.3.0-SINGLE-EXE.exe';go build -trimpath -ldflags='-s -w -H=windowsgui' -o $out .
+          if($LASTEXITCODE -ne 0){throw 'wrapper build failed'}
+
+      - name: Validate final EXE first-run and cached-run
+        working-directory: tools/doi-ten-nen-pdf/wrapper-v430
+        run: |
+          $ErrorActionPreference='Stop'
+          $exe=Join-Path $PWD 'Duoi-duoi-PDF-va-Nen-file-PDF-v4.3.0-SINGLE-EXE.exe'
+          $cache=Join-Path $env:LOCALAPPDATA 'DuoiDuoiPDFNenFilePDF\v4.3.0'
+          Remove-Item $cache -Recurse -Force -ErrorAction SilentlyContinue
+          $p=Start-Process $exe -ArgumentList '--self-test' -Wait -PassThru
+          if($p.ExitCode -ne 0){throw "first-run self-test failed: $($p.ExitCode)"}
+          if(-not(Test-Path (Join-Path $cache '.payload.sha256'))){throw 'cache marker missing'}
+          $p2=Start-Process $exe -ArgumentList '--self-test' -Wait -PassThru
+          if($p2.ExitCode -ne 0){throw "cached self-test failed: $($p2.ExitCode)"}
+          $hash=(Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          "Duoi-duoi-PDF-va-Nen-file-PDF-v4.3.0-SINGLE-EXE.exe  $hash"|Set-Content CHECKSUM.txt -Encoding ascii
+          Write-Host "SHA256=$hash"
+          Write-Host ('EXE size: {0:N1} MB' -f ((Get-Item $exe).Length/1MB))
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Duoi-duoi-PDF-va-Nen-file-PDF-v4.3.0-SINGLE-EXE
+          path: |
+            tools/doi-ten-nen-pdf/wrapper-v430/Duoi-duoi-PDF-va-Nen-file-PDF-v4.3.0-SINGLE-EXE.exe
+            tools/doi-ten-nen-pdf/wrapper-v430/CHECKSUM.txt
+            tools/doi-ten-nen-pdf/wrapper-v430/app-icon-v430.png
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
