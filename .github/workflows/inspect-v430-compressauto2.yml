@@ -1,0 +1,27 @@
+name: Inspect v4.3.0 compressAuto detail
+
+on:
+  push:
+    branches:
+      - inspect-v430-source
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Restore and print exact ranges
+        shell: pwsh
+        working-directory: tools/doi-ten-nen-pdf
+        run: |
+          $b64=(Get-Content -Raw 'main.go.gz.b64').Trim();$bytes=[Convert]::FromBase64String($b64)
+          $ms=[IO.MemoryStream]::new($bytes);$gz=[IO.Compression.GZipStream]::new($ms,[IO.Compression.CompressionMode]::Decompress)
+          $out=[IO.File]::Create((Join-Path $PWD 'main.go'));$gz.CopyTo($out);$out.Dispose();$gz.Dispose();$ms.Dispose()
+          $lines=Get-Content main.go
+          foreach($pair in @(@(900,1040),@(1041,1100),@(1149,1175))){
+            Write-Host "===== RANGE $($pair[0])-$($pair[1]) ====="
+            for($n=$pair[0];$n -le $pair[1];$n++){if($n -le $lines.Count){Write-Host ('{0,5}: {1}' -f $n,$lines[$n-1])}}
+          }
