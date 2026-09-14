@@ -1,0 +1,3 @@
+App: Đuổi đuôi PDF và Nén file PDF
+Version: v4.2.1
+Target: single EXE, offline
