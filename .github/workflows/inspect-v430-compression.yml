@@ -1,0 +1,33 @@
+name: Inspect v4.3.0 compression source
+
+on:
+  push:
+    branches:
+      - inspect-v430-source
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Restore source and print compression context
+        shell: pwsh
+        working-directory: tools/doi-ten-nen-pdf
+        run: |
+          $ErrorActionPreference='Stop'
+          $b64=(Get-Content -Raw 'main.go.gz.b64').Trim()
+          $bytes=[Convert]::FromBase64String($b64)
+          $ms=[IO.MemoryStream]::new($bytes)
+          $gz=[IO.Compression.GZipStream]::new($ms,[IO.Compression.CompressionMode]::Decompress)
+          $out=[IO.File]::Create((Join-Path $PWD 'main.go'))
+          $gz.CopyTo($out);$out.Dispose();$gz.Dispose();$ms.Dispose()
+          $lines=Get-Content main.go
+          $patterns=@('250','220','200','20 MB','19 MB','JPEGQ','ColorImageResolution','GrayImageResolution','MonoImageResolution','compressPDF','runGhostscript','gsArgs','target')
+          $hits=New-Object System.Collections.Generic.HashSet[int]
+          for($i=0;$i -lt $lines.Count;$i++){
+            foreach($p in $patterns){if($lines[$i] -like "*$p*"){for($j=[Math]::Max(0,$i-6);$j -le [Math]::Min($lines.Count-1,$i+12);$j++){[void]$hits.Add($j)};break}}
+          }
+          foreach($i in ($hits|Sort-Object)){Write-Host ('{0,5}: {1}' -f ($i+1),$lines[$i])}
