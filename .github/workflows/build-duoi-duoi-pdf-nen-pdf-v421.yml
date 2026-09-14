@@ -1,0 +1,184 @@
+name: Build Duoi duoi PDF va Nen file PDF v4.2.1
+
+on:
+  push:
+    branches:
+      - build/duoi-duoi-pdf-va-nen-file-pdf-v4.2.1-20260914
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: pwsh
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+          cache: false
+
+      - name: Prepare helper to reuse verified v4.2.0 build stages
+        run: |
+          python -m pip install pyyaml --quiet
+          @'
+          import os, pathlib, subprocess, sys, tempfile, yaml
+          repo = pathlib.Path(os.environ['GITHUB_WORKSPACE'])
+          wf = repo / '.github/workflows/build-doiten-nen-pdf-single-exe-v420.yml'
+          data = yaml.safe_load(wf.read_text(encoding='utf-8'))
+          name = sys.argv[1]
+          for step in data['jobs']['build']['steps']:
+              if step.get('name') == name:
+                  script = step['run']
+                  wd = repo / step.get('working-directory', '.')
+                  fd, p = tempfile.mkstemp(suffix='.ps1')
+                  os.close(fd)
+                  pathlib.Path(p).write_text(script, encoding='utf-8-sig')
+                  try:
+                      subprocess.run(['pwsh','-NoProfile','-ExecutionPolicy','Bypass','-File',p], cwd=wd, check=True)
+                  finally:
+                      os.unlink(p)
+                  raise SystemExit(0)
+          raise SystemExit('step not found: ' + name)
+          '@ | Set-Content run_old_step.py -Encoding utf8
+
+      - name: Restore verified source
+        run: python run_old_step.py "Restore verified application source"
+
+      - name: Apply new app name and version
+        working-directory: tools/doi-ten-nen-pdf
+        run: |
+          $ErrorActionPreference='Stop'
+          $src=Get-Content -Raw -Encoding UTF8 main.go
+          $src=$src.Replace('Đổi tên - Nén file PDF','Đuổi đuôi PDF và Nén file PDF')
+          $src=$src.Replace('ĐỔI TÊN - NÉN FILE PDF','ĐUỔI ĐUÔI PDF VÀ NÉN FILE PDF')
+          foreach($old in @('v4.0.1','v4.0.2','v4.1.0','v4.2.0')){$src=$src.Replace($old,'v4.2.1')}
+          Set-Content main.go -Value $src -Encoding UTF8
+          $verify=Get-Content -Raw -Encoding UTF8 main.go
+          if($verify -notmatch 'Đuổi đuôi PDF và Nén file PDF'){throw 'window title rename failed'}
+          if($verify -notmatch 'ĐUỔI ĐUÔI PDF VÀ NÉN FILE PDF'){throw 'header rename failed'}
+          if($verify -match 'Đổi tên - Nén file PDF'){throw 'old app title remains'}
+
+      - name: Stage bundled offline compression engine
+        run: python run_old_step.py "Stage official Ghostscript offline engine"
+
+      - name: Build verified core once
+        run: python run_old_step.py "Build core application with icon and DPI manifest"
+
+      - name: Redesign icon and rebuild renamed core
+        working-directory: tools/doi-ten-nen-pdf
+        run: |
+          $ErrorActionPreference='Stop'
+          Add-Type -AssemblyName System.Drawing
+          function RoundedRect([float]$x,[float]$y,[float]$w,[float]$h,[float]$r){
+            $p=[Drawing.Drawing2D.GraphicsPath]::new();$d=2*$r
+            $p.AddArc($x,$y,$d,$d,180,90);$p.AddArc($x+$w-$d,$y,$d,$d,270,90)
+            $p.AddArc($x+$w-$d,$y+$h-$d,$d,$d,0,90);$p.AddArc($x,$y+$h-$d,$d,$d,90,90);$p.CloseFigure();return $p
+          }
+          $bmp=[Drawing.Bitmap]::new(256,256);$g=[Drawing.Graphics]::FromImage($bmp)
+          $g.SmoothingMode='AntiAlias';$g.InterpolationMode='HighQualityBicubic';$g.PixelOffsetMode='HighQuality';$g.Clear([Drawing.Color]::Transparent)
+          $tile=RoundedRect 8 8 240 240 48
+          $grad=[Drawing.Drawing2D.LinearGradientBrush]::new([Drawing.RectangleF]::new(8,8,240,240),[Drawing.Color]::FromArgb(17,39,70),[Drawing.Color]::FromArgb(26,102,145),45);$g.FillPath($grad,$tile)
+          $shadow=[Drawing.SolidBrush]::new([Drawing.Color]::FromArgb(55,0,0,0));$sp=RoundedRect 55 30 150 184 18;$g.FillPath($shadow,$sp)
+          $paper=[Drawing.SolidBrush]::new([Drawing.Color]::FromArgb(250,252,255));$pp=RoundedRect 49 24 150 184 18;$g.FillPath($paper,$pp)
+          $fold=[Drawing.SolidBrush]::new([Drawing.Color]::FromArgb(218,229,240));$pts=[Drawing.PointF[]]@([Drawing.PointF]::new(158,24),[Drawing.PointF]::new(199,65),[Drawing.PointF]::new(158,65));$g.FillPolygon($fold,$pts)
+          $lp=[Drawing.Pen]::new([Drawing.Color]::FromArgb(204,214,226),5);$lp.StartCap='Round';$lp.EndCap='Round';$g.DrawLine($lp,70,77,145,77);$g.DrawLine($lp,70,92,166,92)
+          $red=[Drawing.Drawing2D.LinearGradientBrush]::new([Drawing.RectangleF]::new(35,105,178,58),[Drawing.Color]::FromArgb(240,65,72),[Drawing.Color]::FromArgb(191,31,52),0);$band=RoundedRect 35 105 178 58 16;$g.FillPath($red,$band)
+          $f=[Drawing.Font]::new('Segoe UI',31,[Drawing.FontStyle]::Bold,[Drawing.GraphicsUnit]::Pixel);$white=[Drawing.SolidBrush]::new([Drawing.Color]::White);$sf=[Drawing.StringFormat]::new();$sf.Alignment='Center';$sf.LineAlignment='Center';$g.DrawString('PDF',$f,$white,[Drawing.RectangleF]::new(35,105,178,58),$sf)
+          $bs=[Drawing.SolidBrush]::new([Drawing.Color]::FromArgb(65,0,0,0));$g.FillEllipse($bs,135,166,91,91)
+          $bg=[Drawing.Drawing2D.LinearGradientBrush]::new([Drawing.RectangleF]::new(130,161,91,91),[Drawing.Color]::FromArgb(59,218,197),[Drawing.Color]::FromArgb(42,143,225),45);$g.FillEllipse($bg,130,161,91,91)
+          $ap=[Drawing.Pen]::new([Drawing.Color]::White,8);$ap.StartCap='Round';$ap.EndCap='Round';$g.DrawLine($ap,145,191,166,207);$g.DrawLine($ap,145,223,166,207);$g.DrawLine($ap,207,191,186,207);$g.DrawLine($ap,207,223,186,207);$g.DrawLine($ap,166,207,186,207)
+          $png=Join-Path $PWD 'app-icon-v421.png';$bmp.Save($png,[Drawing.Imaging.ImageFormat]::Png);$g.Dispose();$bmp.Dispose()
+          $pb=[IO.File]::ReadAllBytes($png);$ico=Join-Path $PWD 'app-v421.ico';$fs=[IO.File]::Create($ico);$bw=[IO.BinaryWriter]::new($fs)
+          $bw.Write([UInt16]0);$bw.Write([UInt16]1);$bw.Write([UInt16]1);$bw.Write([Byte]0);$bw.Write([Byte]0);$bw.Write([Byte]0);$bw.Write([Byte]0);$bw.Write([UInt16]1);$bw.Write([UInt16]32);$bw.Write([UInt32]$pb.Length);$bw.Write([UInt32]22);$bw.Write([byte[]]$pb);$bw.Dispose();$fs.Dispose()
+          @'
+          <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+          <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+            <assemblyIdentity version="4.2.1.0" processorArchitecture="amd64" name="NguyenHuyToan.DuoiDuoiPDFNenPDF" type="win32"/>
+            <description>Đuổi đuôi PDF và Nén file PDF</description>
+            <dependency><dependentAssembly><assemblyIdentity type="win32" name="Microsoft.Windows.Common-Controls" version="6.0.0.0" processorArchitecture="*" publicKeyToken="6595b64144ccf1df" language="*"/></dependentAssembly></dependency>
+            <application xmlns="urn:schemas-microsoft-com:asm.v3"><windowsSettings><dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true/pm</dpiAware><dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">PerMonitorV2</dpiAwareness><longPathAware xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">true</longPathAware></windowsSettings></application>
+          </assembly>
+          '@ | Set-Content app-v421.manifest -Encoding utf8
+          $rsrc=Join-Path (go env GOPATH) 'bin\rsrc.exe';& $rsrc -ico $ico -manifest app-v421.manifest -o rsrc_windows_amd64.syso
+          if($LASTEXITCODE -ne 0){throw 'v4.2.1 resource build failed'}
+          $old=Join-Path $PWD 'payload\Doi-ten-Nen-file-PDF-core.exe';Remove-Item $old -Force -ErrorAction SilentlyContinue
+          $core=Join-Path $PWD 'payload\Duoi-duoi-PDF-va-Nen-file-PDF-core.exe'
+          gofmt -w main.go;go vet ./...;if($LASTEXITCODE -ne 0){throw 'go vet failed'}
+          go build -trimpath -ldflags='-s -w -H=windowsgui' -o $core .;if($LASTEXITCODE -ne 0){throw 'renamed core build failed'}
+          $p=Start-Process $core -ArgumentList '--self-test' -Wait -PassThru;if($p.ExitCode -ne 0){throw "renamed core self-test failed: $($p.ExitCode)"}
+
+      - name: Create base embedded payload
+        run: python run_old_step.py "Add embedded legal information and create payload ZIP"
+
+      - name: Update embedded docs and rebuild payload archive
+        working-directory: tools/doi-ten-nen-pdf
+        run: |
+          $ErrorActionPreference='Stop';$payload=Join-Path $PWD 'payload'
+          @'
+          ĐUỔI ĐUÔI PDF VÀ NÉN FILE PDF v4.2.1 SINGLE-EXE
+          Thiết kế bởi Nguyễn Huy Toàn - Văn phòng Đảng ủy xã Thanh Lâm - 0979928450
+          Chạy offline 100%; engine nén tích hợp bên trong EXE và được tự quản lý tại %LOCALAPPDATA%\DuoiDuoiPDFNenPDF\v4.2.1.
+          '@ | Set-Content (Join-Path $payload 'HUONG-DAN.txt') -Encoding utf8
+          $zip=Join-Path $PWD 'wrapper\payload.zip';Remove-Item $zip -Force -ErrorAction SilentlyContinue
+          Compress-Archive -Path (Join-Path $payload '*') -DestinationPath $zip -CompressionLevel Optimal
+
+      - name: Generate base wrapper source
+        run: python run_old_step.py "Build single-file self-extracting launcher"
+
+      - name: Rebrand wrapper and build final single EXE
+        working-directory: tools/doi-ten-nen-pdf/wrapper
+        run: |
+          $ErrorActionPreference='Stop'
+          $src=Get-Content -Raw -Encoding UTF8 main.go
+          $src=$src.Replace('v4.2.0','v4.2.1').Replace('Doi-ten-Nen-file-PDF-core.exe','Duoi-duoi-PDF-va-Nen-file-PDF-core.exe').Replace('DoiTenNenPDF','DuoiDuoiPDFNenPDF')
+          Set-Content main.go -Value $src -Encoding UTF8
+          Copy-Item ..\app-v421.ico .\app.ico -Force
+          @'
+          <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+          <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+            <assemblyIdentity version="4.2.1.0" processorArchitecture="amd64" name="NguyenHuyToan.DuoiDuoiPDFNenPDF.SingleExe" type="win32"/>
+            <description>Đuổi đuôi PDF và Nén file PDF v4.2.1</description>
+            <dependency><dependentAssembly><assemblyIdentity type="win32" name="Microsoft.Windows.Common-Controls" version="6.0.0.0" processorArchitecture="*" publicKeyToken="6595b64144ccf1df" language="*"/></dependentAssembly></dependency>
+            <application xmlns="urn:schemas-microsoft-com:asm.v3"><windowsSettings><dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true/pm</dpiAware><dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">PerMonitorV2</dpiAwareness><longPathAware xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">true</longPathAware></windowsSettings></application>
+          </assembly>
+          '@ | Set-Content app-v421.manifest -Encoding utf8
+          $rsrc=Join-Path (go env GOPATH) 'bin\rsrc.exe';& $rsrc -ico app.ico -manifest app-v421.manifest -o rsrc_windows_amd64.syso
+          if($LASTEXITCODE -ne 0){throw 'wrapper resource rebuild failed'}
+          Remove-Item Doi-ten-Nen-file-PDF-v4.2.0-SINGLE-EXE.exe -Force -ErrorAction SilentlyContinue
+          gofmt -w main.go;go vet ./...;if($LASTEXITCODE -ne 0){throw 'wrapper go vet failed'}
+          $out=Join-Path $PWD 'Duoi-duoi-PDF-va-Nen-file-PDF-v4.2.1-SINGLE-EXE.exe'
+          go build -trimpath -ldflags='-s -w -H=windowsgui' -o $out .;if($LASTEXITCODE -ne 0){throw 'final single EXE build failed'}
+
+      - name: Validate final single EXE from an empty folder
+        working-directory: tools/doi-ten-nen-pdf/wrapper
+        run: |
+          $ErrorActionPreference='Stop';$exe=Join-Path $PWD 'Duoi-duoi-PDF-va-Nen-file-PDF-v4.2.1-SINGLE-EXE.exe'
+          if(-not(Test-Path $exe)){throw 'final EXE missing'}
+          $cache=Join-Path $env:LOCALAPPDATA 'DuoiDuoiPDFNenPDF\v4.2.1';Remove-Item $cache -Recurse -Force -ErrorAction SilentlyContinue
+          $empty=Join-Path $env:RUNNER_TEMP 'v421-single-exe-only';Remove-Item $empty -Recurse -Force -ErrorAction SilentlyContinue;New-Item -ItemType Directory $empty|Out-Null
+          Copy-Item $exe (Join-Path $empty (Split-Path $exe -Leaf))
+          $copy=Join-Path $empty (Split-Path $exe -Leaf);$p=Start-Process $copy -ArgumentList '--self-test' -Wait -PassThru
+          if($p.ExitCode -ne 0){throw "first-run single-EXE self-test failed: $($p.ExitCode)"}
+          if(-not(Test-Path (Join-Path $cache '.payload.sha256'))){throw 'cache marker missing'}
+          if(-not(Get-ChildItem (Join-Path $cache 'engine') -Recurse -File -Filter gswin64c.exe -ErrorAction SilentlyContinue)){throw 'embedded engine extraction failed'}
+          $p2=Start-Process $copy -ArgumentList '--self-test' -Wait -PassThru;if($p2.ExitCode -ne 0){throw "cached self-test failed: $($p2.ExitCode)"}
+          $hash=(Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant();"Duoi-duoi-PDF-va-Nen-file-PDF-v4.2.1-SINGLE-EXE.exe  $hash" | Set-Content CHECKSUM-v421.txt -Encoding ascii
+          Write-Host ('Final EXE: {0:N1} MB' -f ((Get-Item $exe).Length/1MB));Write-Host "SHA256: $hash"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Duoi-duoi-PDF-va-Nen-file-PDF-v4.2.1-SINGLE-EXE
+          path: |
+            tools/doi-ten-nen-pdf/wrapper/Duoi-duoi-PDF-va-Nen-file-PDF-v4.2.1-SINGLE-EXE.exe
+            tools/doi-ten-nen-pdf/wrapper/CHECKSUM-v421.txt
+            tools/doi-ten-nen-pdf/app-icon-v421.png
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
