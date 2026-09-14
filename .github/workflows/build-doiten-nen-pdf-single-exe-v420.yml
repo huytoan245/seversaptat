@@ -1,0 +1,355 @@
+name: Build Doi ten - Nen file PDF v4.2.0 Single EXE
+
+on:
+  push:
+    branches:
+      - build/doi-ten-nen-pdf-v4.2.0-single-exe-20260914
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        shell: pwsh
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+          cache: false
+
+      - name: Restore verified application source
+        working-directory: tools/doi-ten-nen-pdf
+        run: |
+          $ErrorActionPreference='Stop'
+          $b64=(Get-Content -Raw 'main.go.gz.b64').Trim()
+          $bytes=[Convert]::FromBase64String($b64)
+          $ms=[IO.MemoryStream]::new($bytes)
+          $gz=[IO.Compression.GZipStream]::new($ms,[IO.Compression.CompressionMode]::Decompress)
+          $out=[IO.File]::Create((Join-Path $PWD 'main.go'))
+          $gz.CopyTo($out);$out.Dispose();$gz.Dispose();$ms.Dispose()
+          $hash=(Get-FileHash main.go -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($hash -ne '1cadc37626f8ad1671b713471912882c8e87c02ef54e11447ff35c744e0de8c9'){throw "source checksum mismatch: $hash"}
+          "module doiten-nen-pdf`n`ngo 1.23`n" | Set-Content go.mod -Encoding ascii
+
+      - name: Stage official Ghostscript offline engine
+        working-directory: tools/doi-ten-nen-pdf
+        run: |
+          $ErrorActionPreference='Stop'
+          $installer=Join-Path $env:RUNNER_TEMP 'gs10080w64.exe'
+          $url='https://github.com/ArtifexSoftware/ghostpdl-downloads/releases/download/gs10080/gs10080w64.exe'
+          $expected='52a91b8bf09298788d7a57b9206127026c23eacd75405f0a131e26dc381dce50'
+          Invoke-WebRequest -Uri $url -OutFile $installer -UseBasicParsing
+          $actual=(Get-FileHash $installer -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($actual -ne $expected){throw "Ghostscript checksum mismatch: $actual"}
+
+          $extract=Join-Path $env:RUNNER_TEMP 'gs-extracted-v420'
+          Remove-Item $extract -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Path $extract|Out-Null
+          $seven=(Get-Command 7z.exe -ErrorAction SilentlyContinue).Source
+          if(-not $seven){$seven='C:\Program Files\7-Zip\7z.exe'}
+          if(-not(Test-Path $seven)){throw '7-Zip missing on Windows runner'}
+          & $seven x $installer "-o$extract" -y | Out-Host
+          if($LASTEXITCODE -ne 0){throw "7-Zip extraction failed: $LASTEXITCODE"}
+          $gs=Get-ChildItem $extract -Recurse -File -Filter gswin64c.exe|Select-Object -First 1
+          if(-not $gs){throw 'gswin64c.exe not found'}
+          $root=Split-Path (Split-Path $gs.FullName -Parent) -Parent
+          $engine=Join-Path $PWD 'payload\engine\ghostscript-10.08.0'
+          New-Item -ItemType Directory -Force -Path $engine|Out-Null
+          Copy-Item (Join-Path $root '*') $engine -Recurse -Force
+          $bundled=Get-ChildItem $engine -Recurse -File -Filter gswin64c.exe|Select-Object -First 1
+          if(-not $bundled){throw 'offline engine copy incomplete'}
+          & $bundled.FullName --version
+          if($LASTEXITCODE -ne 0){throw 'bundled Ghostscript cannot start'}
+
+      - name: Build core application with icon and DPI manifest
+        working-directory: tools/doi-ten-nen-pdf
+        run: |
+          $ErrorActionPreference='Stop'
+          Add-Type -AssemblyName System.Drawing
+          $bmp=[Drawing.Bitmap]::new(256,256)
+          $g=[Drawing.Graphics]::FromImage($bmp)
+          $g.SmoothingMode=[Drawing.Drawing2D.SmoothingMode]::AntiAlias
+          $g.Clear([Drawing.Color]::Transparent)
+          $bg=[Drawing.SolidBrush]::new([Drawing.Color]::FromArgb(25,47,76));$g.FillEllipse($bg,8,8,240,240)
+          $paper=[Drawing.SolidBrush]::new([Drawing.Color]::FromArgb(250,250,250));$g.FillRectangle($paper,55,36,146,176)
+          $red=[Drawing.SolidBrush]::new([Drawing.Color]::FromArgb(225,55,64));$g.FillRectangle($red,38,101,180,62)
+          $font=[Drawing.Font]::new('Segoe UI',32,[Drawing.FontStyle]::Bold,[Drawing.GraphicsUnit]::Pixel)
+          $white=[Drawing.SolidBrush]::new([Drawing.Color]::White);$sf=[Drawing.StringFormat]::new();$sf.Alignment='Center';$sf.LineAlignment='Center'
+          $g.DrawString('PDF',$font,$white,[Drawing.RectangleF]::new(38,101,180,62),$sf)
+          $pen=[Drawing.Pen]::new([Drawing.Color]::FromArgb(75,180,255),11);$pen.StartCap='Round';$pen.EndCap='Round'
+          $g.DrawLine($pen,102,190,128,218);$g.DrawLine($pen,154,190,128,218);$g.DrawLine($pen,128,218,128,180)
+          $png=Join-Path $PWD 'app-icon.png';$bmp.Save($png,[Drawing.Imaging.ImageFormat]::Png);$g.Dispose();$bmp.Dispose()
+          $pb=[IO.File]::ReadAllBytes($png);$ico=Join-Path $PWD 'app.ico';$fs=[IO.File]::Create($ico);$bw=[IO.BinaryWriter]::new($fs)
+          $bw.Write([UInt16]0);$bw.Write([UInt16]1);$bw.Write([UInt16]1);$bw.Write([Byte]0);$bw.Write([Byte]0);$bw.Write([Byte]0);$bw.Write([Byte]0);$bw.Write([UInt16]1);$bw.Write([UInt16]32);$bw.Write([UInt32]$pb.Length);$bw.Write([UInt32]22);$bw.Write([byte[]]$pb);$bw.Dispose();$fs.Dispose()
+          @'
+          <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+          <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+            <assemblyIdentity version="4.2.0.0" processorArchitecture="amd64" name="NguyenHuyToan.DoiTenNenPDF" type="win32"/>
+            <description>Đổi tên - Nén file PDF</description>
+            <dependency><dependentAssembly><assemblyIdentity type="win32" name="Microsoft.Windows.Common-Controls" version="6.0.0.0" processorArchitecture="*" publicKeyToken="6595b64144ccf1df" language="*"/></dependentAssembly></dependency>
+            <application xmlns="urn:schemas-microsoft-com:asm.v3"><windowsSettings><dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true/pm</dpiAware><dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">PerMonitorV2</dpiAwareness><longPathAware xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">true</longPathAware></windowsSettings></application>
+          </assembly>
+          '@ | Set-Content app.manifest -Encoding utf8
+          go install github.com/akavel/rsrc@latest
+          $rsrc=Join-Path (go env GOPATH) 'bin\rsrc.exe'
+          & $rsrc -ico app.ico -manifest app.manifest -o rsrc_windows_amd64.syso
+          if($LASTEXITCODE -ne 0){throw 'resource build failed'}
+
+          gofmt -w main.go
+          go vet ./...
+          if($LASTEXITCODE -ne 0){throw 'go vet failed'}
+          $payload=Join-Path $PWD 'payload'
+          $core=Join-Path $payload 'Doi-ten-Nen-file-PDF-core.exe'
+          go build -trimpath -ldflags='-s -w -H=windowsgui' -o $core .
+          if($LASTEXITCODE -ne 0){throw 'core build failed'}
+
+          # Update visible legacy version strings without changing binary length.
+          $bytes=[IO.File]::ReadAllBytes($core)
+          function Replace-Bytes([byte[]]$data,[byte[]]$from,[byte[]]$to){
+            if($from.Length -ne $to.Length){throw 'replacement length mismatch'}
+            for($i=0;$i -le $data.Length-$from.Length;$i++){
+              $ok=$true
+              for($j=0;$j -lt $from.Length;$j++){if($data[$i+$j] -ne $from[$j]){$ok=$false;break}}
+              if($ok){for($j=0;$j -lt $to.Length;$j++){$data[$i+$j]=$to[$j]};$i+=$from.Length-1}
+            }
+          }
+          foreach($old in @('v4.0.1','v4.0.2','v4.1.0')){
+            Replace-Bytes $bytes ([Text.Encoding]::UTF8.GetBytes($old)) ([Text.Encoding]::UTF8.GetBytes('v4.2.0'))
+            Replace-Bytes $bytes ([Text.Encoding]::Unicode.GetBytes($old)) ([Text.Encoding]::Unicode.GetBytes('v4.2.0'))
+          }
+          [IO.File]::WriteAllBytes($core,$bytes)
+          $p=Start-Process $core -ArgumentList '--self-test' -Wait -PassThru
+          if($p.ExitCode -ne 0){throw "core self-test failed: $($p.ExitCode)"}
+
+      - name: Add embedded legal information and create payload ZIP
+        working-directory: tools/doi-ten-nen-pdf
+        run: |
+          $ErrorActionPreference='Stop'
+          $payload=Join-Path $PWD 'payload'
+          @'
+          ĐỔI TÊN - NÉN FILE PDF v4.2.0 SINGLE-EXE
+          Thiết kế bởi Nguyễn Huy Toàn - Văn phòng Đảng ủy xã Thanh Lâm - 0979928450
+
+          Bộ nén được tích hợp trong file EXE phát hành. Khi chạy lần đầu, ứng dụng tự giải nén engine nội bộ vào:
+          %LOCALAPPDATA%\DoiTenNenPDF\v4.2.0
+          Đây là dữ liệu chương trình, không phải dữ liệu PDF của người dùng.
+          Ứng dụng hoạt động offline, không cần tải engine từ Internet.
+          '@ | Set-Content (Join-Path $payload 'HUONG-DAN.txt') -Encoding utf8
+          @'
+          Bộ nén: Artifex Ghostscript 10.08.0 Windows x64, binary chính thức không sửa đổi.
+          Nguồn: https://github.com/ArtifexSoftware/ghostpdl-downloads/releases/tag/gs10080
+          Installer SHA-256: 52a91b8bf09298788d7a57b9206127026c23eacd75405f0a131e26dc381dce50
+          License: GNU AGPL hoặc giấy phép thương mại Artifex. Xem https://www.ghostscript.com/licensing/
+          '@ | Set-Content (Join-Path $payload 'THONG-TIN-GHOSTSCRIPT.txt') -Encoding utf8
+          $engine=Join-Path $payload 'engine\ghostscript-10.08.0';$legal=Join-Path $payload 'engine\LEGAL';New-Item -ItemType Directory -Force $legal|Out-Null
+          Get-ChildItem $engine -Recurse -File | Where-Object {$_.Name -match 'COPYING|LICENSE|AGPL|NOTICE|README' -or $_.FullName -match '\\doc\\'} | ForEach-Object {$d=Join-Path $legal $_.Name;if(-not(Test-Path $d)){Copy-Item $_.FullName $d}}
+          $zip=Join-Path $PWD 'wrapper\payload.zip';New-Item -ItemType Directory -Force (Split-Path $zip -Parent)|Out-Null
+          Remove-Item $zip -Force -ErrorAction SilentlyContinue
+          Compress-Archive -Path (Join-Path $payload '*') -DestinationPath $zip -CompressionLevel Optimal
+          if(-not(Test-Path $zip)){throw 'payload zip missing'}
+          Write-Host ('Embedded payload ZIP: {0:N1} MB' -f ((Get-Item $zip).Length/1MB))
+
+      - name: Build single-file self-extracting launcher
+        working-directory: tools/doi-ten-nen-pdf/wrapper
+        run: |
+          $ErrorActionPreference='Stop'
+          @'
+          package main
+
+          import (
+              "archive/zip"
+              "bytes"
+              "crypto/sha256"
+              _ "embed"
+              "encoding/hex"
+              "errors"
+              "fmt"
+              "io"
+              "os"
+              "os/exec"
+              "path/filepath"
+              "strings"
+              "time"
+          )
+
+          //go:embed payload.zip
+          var payload []byte
+
+          const version = "v4.2.0"
+          const coreName = "Doi-ten-Nen-file-PDF-core.exe"
+
+          func payloadHash() string {
+              h := sha256.Sum256(payload)
+              return hex.EncodeToString(h[:])
+          }
+
+          func appRoot() (string, error) {
+              base := os.Getenv("LOCALAPPDATA")
+              if base == "" {
+                  var err error
+                  base, err = os.UserCacheDir()
+                  if err != nil { return "", err }
+              }
+              return filepath.Join(base, "DoiTenNenPDF", version), nil
+          }
+
+          func requiredFilesOK(root string) bool {
+              if st, err := os.Stat(filepath.Join(root, coreName)); err != nil || st.IsDir() { return false }
+              matches, _ := filepath.Glob(filepath.Join(root, "engine", "ghostscript-10.08.0", "**", "gswin64c.exe"))
+              if len(matches) > 0 { return true }
+              found := false
+              filepath.WalkDir(filepath.Join(root, "engine"), func(path string, d os.DirEntry, err error) error {
+                  if err == nil && !d.IsDir() && strings.EqualFold(d.Name(), "gswin64c.exe") { found = true; return errors.New("found") }
+                  return nil
+              })
+              return found
+          }
+
+          func isCurrent(root string) bool {
+              b, err := os.ReadFile(filepath.Join(root, ".payload.sha256"))
+              return err == nil && strings.TrimSpace(string(b)) == payloadHash() && requiredFilesOK(root)
+          }
+
+          func extractPayload(stage string) error {
+              zr, err := zip.NewReader(bytes.NewReader(payload), int64(len(payload)))
+              if err != nil { return err }
+              base := filepath.Clean(stage) + string(os.PathSeparator)
+              for _, f := range zr.File {
+                  clean := filepath.Clean(f.Name)
+                  if clean == "." || filepath.IsAbs(clean) || strings.HasPrefix(clean, ".."+string(os.PathSeparator)) || clean == ".." { return fmt.Errorf("unsafe payload path: %s", f.Name) }
+                  dst := filepath.Join(stage, clean)
+                  if !strings.HasPrefix(filepath.Clean(dst)+func() string { if f.FileInfo().IsDir(){return string(os.PathSeparator)};return "" }(), base) && filepath.Clean(dst) != filepath.Clean(stage) { return fmt.Errorf("payload escaped root: %s", f.Name) }
+                  if f.FileInfo().IsDir() {
+                      if err := os.MkdirAll(dst, 0755); err != nil { return err }
+                      continue
+                  }
+                  if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil { return err }
+                  rc, err := f.Open(); if err != nil { return err }
+                  out, err := os.OpenFile(dst, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0644)
+                  if err != nil { rc.Close(); return err }
+                  _, cpErr := io.Copy(out, rc)
+                  closeErr := out.Close(); rc.Close()
+                  if cpErr != nil { return cpErr }
+                  if closeErr != nil { return closeErr }
+              }
+              return nil
+          }
+
+          func ensurePayload(root string) error {
+              if isCurrent(root) { return nil }
+              parent := filepath.Dir(root)
+              if err := os.MkdirAll(parent, 0755); err != nil { return err }
+              lock := root + ".extract.lock"
+              var lf *os.File
+              var err error
+              for i := 0; i < 160; i++ {
+                  lf, err = os.OpenFile(lock, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+                  if err == nil { break }
+                  if isCurrent(root) { return nil }
+                  time.Sleep(250 * time.Millisecond)
+              }
+              if err != nil { return fmt.Errorf("cannot acquire extraction lock: %w", err) }
+              lf.Close(); defer os.Remove(lock)
+              if isCurrent(root) { return nil }
+
+              stage := fmt.Sprintf("%s.staging-%d", root, os.Getpid())
+              os.RemoveAll(stage)
+              if err := os.MkdirAll(stage, 0755); err != nil { return err }
+              if err := extractPayload(stage); err != nil { os.RemoveAll(stage); return err }
+              if !requiredFilesOK(stage) { os.RemoveAll(stage); return errors.New("embedded PDF engine validation failed") }
+              if err := os.WriteFile(filepath.Join(stage, ".payload.sha256"), []byte(payloadHash()+"\n"), 0644); err != nil { os.RemoveAll(stage); return err }
+              os.RemoveAll(root)
+              if err := os.Rename(stage, root); err != nil { os.RemoveAll(stage); return err }
+              return nil
+          }
+
+          func runCore(root string, wait bool) int {
+              core := filepath.Join(root, coreName)
+              args := os.Args[1:]
+              cmd := exec.Command(core, args...)
+              cmd.Dir = root
+              if err := cmd.Start(); err != nil { return 21 }
+              if !wait { _ = cmd.Process.Release(); return 0 }
+              err := cmd.Wait()
+              if err == nil { return 0 }
+              var ee *exec.ExitError
+              if errors.As(err, &ee) { return ee.ExitCode() }
+              return 22
+          }
+
+          func main() {
+              root, err := appRoot(); if err != nil { os.Exit(10) }
+              if err := ensurePayload(root); err != nil {
+                  logDir := filepath.Dir(root); _ = os.MkdirAll(logDir,0755)
+                  _ = os.WriteFile(filepath.Join(logDir,"v4.2.0-startup-error.txt"),[]byte(time.Now().Format(time.RFC3339)+" "+err.Error()+"\n"),0644)
+                  os.Exit(11)
+              }
+              self := len(os.Args) > 1 && os.Args[1] == "--self-test"
+              os.Exit(runCore(root, self))
+          }
+          '@ | Set-Content main.go -Encoding utf8
+          "module singleexe`n`ngo 1.23`n" | Set-Content go.mod -Encoding ascii
+
+          Copy-Item ..\app.ico .\app.ico -Force
+          @'
+          <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+          <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+            <assemblyIdentity version="4.2.0.0" processorArchitecture="amd64" name="NguyenHuyToan.DoiTenNenPDF.SingleExe" type="win32"/>
+            <description>Đổi tên - Nén file PDF v4.2.0 Single EXE</description>
+            <dependency><dependentAssembly><assemblyIdentity type="win32" name="Microsoft.Windows.Common-Controls" version="6.0.0.0" processorArchitecture="*" publicKeyToken="6595b64144ccf1df" language="*"/></dependentAssembly></dependency>
+            <application xmlns="urn:schemas-microsoft-com:asm.v3"><windowsSettings><dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true/pm</dpiAware><dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">PerMonitorV2</dpiAwareness><longPathAware xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">true</longPathAware></windowsSettings></application>
+          </assembly>
+          '@ | Set-Content app.manifest -Encoding utf8
+          go install github.com/akavel/rsrc@latest
+          $rsrc=Join-Path (go env GOPATH) 'bin\rsrc.exe'
+          & $rsrc -ico app.ico -manifest app.manifest -o rsrc_windows_amd64.syso
+          if($LASTEXITCODE -ne 0){throw 'wrapper resource build failed'}
+          gofmt -w main.go
+          go vet ./...
+          if($LASTEXITCODE -ne 0){throw 'wrapper go vet failed'}
+          $out=Join-Path $PWD 'Doi-ten-Nen-file-PDF-v4.2.0-SINGLE-EXE.exe'
+          go build -trimpath -ldflags='-s -w -H=windowsgui' -o $out .
+          if($LASTEXITCODE -ne 0){throw 'single EXE build failed'}
+
+      - name: Validate single EXE end-to-end and cache reuse
+        working-directory: tools/doi-ten-nen-pdf/wrapper
+        run: |
+          $ErrorActionPreference='Stop'
+          $exe=Join-Path $PWD 'Doi-ten-Nen-file-PDF-v4.2.0-SINGLE-EXE.exe'
+          if(-not(Test-Path $exe)){throw 'single EXE missing'}
+          $cache=Join-Path $env:LOCALAPPDATA 'DoiTenNenPDF\v4.2.0'
+          Remove-Item $cache -Recurse -Force -ErrorAction SilentlyContinue
+          $sw=[Diagnostics.Stopwatch]::StartNew()
+          $p=Start-Process $exe -ArgumentList '--self-test' -Wait -PassThru
+          $sw.Stop()
+          if($p.ExitCode -ne 0){throw "first-run embedded self-test failed: $($p.ExitCode)"}
+          if(-not(Test-Path (Join-Path $cache '.payload.sha256'))){throw 'payload cache marker missing'}
+          if(-not(Get-ChildItem (Join-Path $cache 'engine') -Recurse -File -Filter gswin64c.exe -ErrorAction SilentlyContinue)){throw 'extracted engine missing'}
+          Write-Host ('First-run extraction+self-test: {0:N2}s' -f $sw.Elapsed.TotalSeconds)
+          $sw.Restart()
+          $p2=Start-Process $exe -ArgumentList '--self-test' -Wait -PassThru
+          $sw.Stop()
+          if($p2.ExitCode -ne 0){throw "cached self-test failed: $($p2.ExitCode)"}
+          Write-Host ('Cached self-test: {0:N2}s' -f $sw.Elapsed.TotalSeconds)
+          $hash=(Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          $size=(Get-Item $exe).Length
+          "Doi-ten-Nen-file-PDF-v4.2.0-SINGLE-EXE.exe  $hash" | Set-Content CHECKSUM.txt -Encoding ascii
+          Write-Host ('Final single EXE: {0:N1} MB' -f ($size/1MB))
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Doi-ten-Nen-file-PDF-v4.2.0-SINGLE-EXE
+          path: |
+            tools/doi-ten-nen-pdf/wrapper/Doi-ten-Nen-file-PDF-v4.2.0-SINGLE-EXE.exe
+            tools/doi-ten-nen-pdf/wrapper/CHECKSUM.txt
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
