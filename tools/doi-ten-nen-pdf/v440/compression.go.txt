@@ -1,0 +1,386 @@
+type compressionResult struct {
+	Replaced        bool
+	NewSize         int64
+	Note            string
+	Err             error
+	PagesScanned    int
+	PagesCompressed int
+}
+
+type autoProfile440 struct {
+	dpi     int
+	quality int
+	label   string
+}
+
+// Highest-quality profile is always tried first. A page stops at the FIRST
+// generation below 500 KB, so the app never keeps lowering quality just to
+// make a page unnecessarily small. The last profiles are only emergency
+// fallbacks for unusually hard photo/scan pages; monochrome remains >=300 DPI
+// inside runGhostscript.
+var autoProfiles440 = []autoProfile440{
+	{300, 97, "300 DPI/Q97"},
+	{300, 94, "300 DPI/Q94"},
+	{300, 90, "300 DPI/Q90"},
+	{280, 92, "280 DPI/Q92"},
+	{260, 90, "260 DPI/Q90"},
+	{240, 88, "240 DPI/Q88"},
+	{220, 86, "220 DPI/Q86"},
+	{200, 84, "200 DPI/Q84"},
+	{190, 82, "190 DPI/Q82"},
+	{180, 80, "180 DPI/Q80"},
+	{170, 78, "170 DPI/Q78"},
+	{160, 76, "160 DPI/Q76"},
+	{150, 74, "150 DPI/Q74"},
+	{140, 70, "140 DPI/Q70 • file cứng đầu"},
+	{130, 67, "130 DPI/Q67 • file cứng đầu"},
+	{120, 63, "120 DPI/Q63 • dự phòng cuối"},
+	{110, 59, "110 DPI/Q59 • dự phòng cuối"},
+	{100, 55, "100 DPI/Q55 • dự phòng đặc biệt"},
+}
+
+const (
+	pageHardLimit440 = int64(500 * 1024)                 // output must be STRICTLY below this
+	pageTarget440    = int64(480 * 1024)                 // soft target only; quality has priority
+	fileSafeLimit440 = int64(188 * 1024 * 1024 / 10)    // 18.8 MiB, safely below 20 MB variants
+)
+
+func compressAutoPageAware440(ctx context.Context, gs, qpdf, path string) compressionResult {
+	orig, err := os.Stat(path)
+	if err != nil {
+		return compressionResult{Err: err}
+	}
+	origPages := pdfPageCount(ctx, gs, path)
+	workDir, err := os.MkdirTemp("", "DoiTenNenPDF-v440-pages-")
+	if err != nil {
+		return compressionResult{Err: err}
+	}
+	defer os.RemoveAll(workDir)
+
+	pages, err := splitPDFPages440(ctx, qpdf, path, filepath.Join(workDir, "original"))
+	if err != nil {
+		return compressionResult{Err: fmt.Errorf("không tách được trang để kiểm tra: %w", err)}
+	}
+	base := compressionResult{PagesScanned: len(pages)}
+	if origPages > 0 && len(pages) != origPages {
+		base.Err = fmt.Errorf("số trang khi phân tích thay đổi: %d → %d; giữ nguyên file gốc", origPages, len(pages))
+		return base
+	}
+
+	oversized := make([]int, 0)
+	for i, p := range pages {
+		fi, statErr := os.Stat(p)
+		if statErr != nil {
+			base.Err = statErr
+			return base
+		}
+		if fi.Size() > pageHardLimit440 {
+			oversized = append(oversized, i)
+		}
+	}
+
+	// Fast exit: both constraints are already satisfied. The file is not rewritten.
+	if len(oversized) == 0 && orig.Size() < fileSafeLimit440 {
+		base.Note = fmt.Sprintf("Không cần nén: %d trang đều ≤500 KB và file %.2f MB", len(pages), mb(orig.Size()))
+		return base
+	}
+
+	// Preferred path: touch ONLY pages that are >500 KB. Every candidate page is
+	// rendered from its ORIGINAL split page. Untouched pages are copied losslessly
+	// from the ORIGINAL PDF during the qpdf rebuild.
+	if len(oversized) > 0 {
+		replacements := make(map[int]string, len(oversized))
+		selectiveOK := true
+		for _, idx := range oversized {
+			optimized, _, optimizeErr := compressPageFromOriginal440(ctx, gs, pages[idx], workDir, idx+1)
+			if optimizeErr != nil {
+				selectiveOK = false
+				break
+			}
+			replacements[idx] = optimized
+		}
+
+		if selectiveOK {
+			trial, tempErr := tempPDFPath(path)
+			if tempErr != nil {
+				base.Err = tempErr
+				return base
+			}
+			_ = os.Remove(trial) // qpdf creates the output atomically enough for a temporary candidate
+			defer os.Remove(trial)
+
+			mergeErr := mergePagePlan440(ctx, qpdf, path, len(pages), replacements, trial)
+			if mergeErr == nil && validPDF(trial) {
+				trialPages := pdfPageCount(ctx, gs, trial)
+				if origPages <= 0 || trialPages == origPages {
+					fi, statErr := os.Stat(trial)
+					if statErr == nil {
+						maxPage, overCount, verifyErr := verifyPageLimit440(ctx, qpdf, trial, workDir)
+						if verifyErr == nil && overCount == 0 && fi.Size() < fileSafeLimit440 {
+							if replaceErr := replaceOriginal(path, trial); replaceErr != nil {
+								base.Err = replaceErr
+								return base
+							}
+							base.Replaced = true
+							base.NewSize = fi.Size()
+							base.PagesCompressed = len(oversized)
+							base.Note = fmt.Sprintf("AUTO 1 lần từ bản gốc • tối ưu %d/%d trang >500 KB (%s) • trang lớn nhất sau xử lý %.0f KB", len(oversized), len(pages), pageList440(oversized), float64(maxPage)/1024)
+							return base
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// Selective page replacement could not satisfy BOTH constraints at the same
+	// time (page <500 KB and file <20 MB). Discard that trial completely. Every
+	// whole-file profile below starts again from ORIGINAL path. A compressed trial
+	// is NEVER used as input to another Ghostscript pass: no cumulative loss.
+	whole := compressWholeOriginalVerified440(ctx, gs, qpdf, path, workDir, origPages)
+	whole.PagesScanned = len(pages)
+	whole.PagesCompressed = len(oversized)
+	if whole.Replaced {
+		if len(oversized) > 0 {
+			whole.Note += fmt.Sprintf(" • fallback toàn file 1 lần từ bản gốc để đồng thời đạt <20 MB và <500 KB/trang • %d trang gốc >500 KB", len(oversized))
+		} else {
+			whole.Note += " • file >20 MB, mọi lần thử đều lấy trực tiếp từ bản gốc"
+		}
+	}
+	return whole
+}
+
+func compressPageFromOriginal440(ctx context.Context, gs, sourcePage, workDir string, pageNo int) (string, int64, error) {
+	var bestSize int64
+	for attempt, p := range autoProfiles440 {
+		if ctx.Err() != nil {
+			return "", 0, ctx.Err()
+		}
+		out := filepath.Join(workDir, fmt.Sprintf("optimized-%06d-%02d.pdf", pageNo, attempt))
+		size, err := runGhostscript(ctx, gs, sourcePage, out, p.dpi, p.quality)
+		if err != nil {
+			_ = os.Remove(out)
+			if errors.Is(err, context.Canceled) {
+				return "", 0, err
+			}
+			continue
+		}
+		if !validPDF(out) || pdfPageCount(ctx, gs, out) != 1 {
+			_ = os.Remove(out)
+			continue
+		}
+		if bestSize == 0 || size < bestSize {
+			bestSize = size
+		}
+
+		// FIRST acceptable result wins. This intentionally avoids chasing 480 KB
+		// exactly when a higher-quality 490 KB generation is already valid.
+		if size < pageHardLimit440 {
+			return out, size, nil
+		}
+		_ = os.Remove(out)
+	}
+	if bestSize > 0 {
+		return "", 0, fmt.Errorf("trang %d vẫn %.0f KB sau mức dự phòng cuối; giữ nguyên file gốc để tránh tạo file không đạt chuẩn", pageNo, float64(bestSize)/1024)
+	}
+	return "", 0, fmt.Errorf("không tạo được bản tối ưu hợp lệ cho trang %d", pageNo)
+}
+
+func compressWholeOriginalVerified440(ctx context.Context, gs, qpdf, original, workDir string, origPages int) compressionResult {
+	orig, err := os.Stat(original)
+	if err != nil {
+		return compressionResult{Err: err}
+	}
+	var bestSize int64
+	for _, p := range autoProfiles440 {
+		if ctx.Err() != nil {
+			return compressionResult{Err: ctx.Err()}
+		}
+
+		trial, tempErr := tempPDFPath(original)
+		if tempErr != nil {
+			return compressionResult{Err: tempErr}
+		}
+		size, runErr := runGhostscript(ctx, gs, original, trial, p.dpi, p.quality)
+		if runErr != nil {
+			_ = os.Remove(trial)
+			if errors.Is(runErr, context.Canceled) {
+				return compressionResult{Err: runErr}
+			}
+			continue
+		}
+		if !validPDF(trial) {
+			_ = os.Remove(trial)
+			continue
+		}
+		if outPages := pdfPageCount(ctx, gs, trial); origPages > 0 && outPages > 0 && outPages != origPages {
+			_ = os.Remove(trial)
+			return compressionResult{Err: fmt.Errorf("số trang thay đổi sau nén: %d → %d; giữ nguyên file gốc", origPages, outPages)}
+		}
+		if bestSize == 0 || size < bestSize {
+			bestSize = size
+		}
+		if size >= orig.Size() || size >= fileSafeLimit440 {
+			_ = os.Remove(trial)
+			continue
+		}
+
+		maxPage, overCount, verifyErr := verifyPageLimit440(ctx, qpdf, trial, workDir)
+		if verifyErr != nil || overCount > 0 {
+			_ = os.Remove(trial)
+			continue
+		}
+		if replaceErr := replaceOriginal(original, trial); replaceErr != nil {
+			_ = os.Remove(trial)
+			return compressionResult{Err: replaceErr}
+		}
+		return compressionResult{
+			Replaced: true,
+			NewSize:  size,
+			Note:     fmt.Sprintf("AUTO %s • file %.2f MB • trang lớn nhất %.0f KB", p.label, mb(size), float64(maxPage)/1024),
+		}
+	}
+
+	if bestSize > 0 {
+		return compressionResult{Err: fmt.Errorf("không thể đồng thời đạt file <20 MB và mọi trang cần xử lý <500 KB trong các mức dự phòng (bản thử nhỏ nhất %.2f MB); giữ nguyên file gốc", mb(bestSize))}
+	}
+	return compressionResult{Err: errors.New("không tạo được bản PDF tối ưu hợp lệ; giữ nguyên file gốc")}
+}
+
+func splitPDFPages440(ctx context.Context, qpdf, input, dir string) ([]string, error) {
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return nil, err
+	}
+	pattern := filepath.Join(dir, "page-%d.pdf")
+	if err := runQPDF440(ctx, qpdf, "--warning-exit-0", "--split-pages", input, pattern); err != nil {
+		return nil, err
+	}
+	pages, err := filepath.Glob(filepath.Join(dir, "page-*.pdf"))
+	if err != nil {
+		return nil, err
+	}
+	if len(pages) == 0 {
+		return nil, errors.New("qpdf không tạo được trang tách")
+	}
+	sort.Slice(pages, func(i, j int) bool { return splitPageNumber440(pages[i]) < splitPageNumber440(pages[j]) })
+	return pages, nil
+}
+
+func splitPageNumber440(path string) int {
+	name := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
+	idx := strings.LastIndex(name, "-")
+	if idx < 0 || idx+1 >= len(name) {
+		return 0
+	}
+	n, _ := strconv.Atoi(name[idx+1:])
+	return n
+}
+
+func verifyPageLimit440(ctx context.Context, qpdf, input, workDir string) (int64, int, error) {
+	dir, err := os.MkdirTemp(workDir, "verify-")
+	if err != nil {
+		return 0, 0, err
+	}
+	defer os.RemoveAll(dir)
+	pages, err := splitPDFPages440(ctx, qpdf, input, dir)
+	if err != nil {
+		return 0, 0, err
+	}
+	var maxSize int64
+	over := 0
+	for _, p := range pages {
+		fi, statErr := os.Stat(p)
+		if statErr != nil {
+			return 0, 0, statErr
+		}
+		if fi.Size() > maxSize {
+			maxSize = fi.Size()
+		}
+		if fi.Size() >= pageHardLimit440 {
+			over++
+		}
+	}
+	return maxSize, over, nil
+}
+
+func mergePagePlan440(ctx context.Context, qpdf, original string, pageCount int, replacements map[int]string, output string) error {
+	args := []string{"--warning-exit-0", original, "--pages"}
+	for i := 0; i < pageCount; i++ {
+		if replacement, ok := replacements[i]; ok {
+			args = append(args, replacement, "1")
+		} else {
+			args = append(args, ".", strconv.Itoa(i+1))
+		}
+	}
+	args = append(args, "--", output)
+	return runQPDF440(ctx, qpdf, args...)
+}
+
+func runQPDF440(ctx context.Context, qpdf string, args ...string) error {
+	cmd := exec.CommandContext(ctx, qpdf, args...)
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		return fmt.Errorf("qpdf: %v (%s)", err, strings.TrimSpace(stderr.String()))
+	}
+	return nil
+}
+
+func findQPDF440() string {
+	roots := make([]string, 0, 4)
+	if wd, err := os.Getwd(); err == nil {
+		roots = append(roots, wd, filepath.Join(wd, "engine"))
+	}
+	if exe, err := os.Executable(); err == nil {
+		dir := filepath.Dir(exe)
+		roots = append(roots, dir, filepath.Join(dir, "engine"))
+	}
+
+	seen := map[string]bool{}
+	for _, root := range roots {
+		if root == "" || seen[root] {
+			continue
+		}
+		seen[root] = true
+		if st, err := os.Stat(root); err != nil || !st.IsDir() {
+			continue
+		}
+		found := ""
+		_ = filepath.WalkDir(root, func(path string, d os.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				return nil
+			}
+			if !d.IsDir() && strings.EqualFold(d.Name(), "qpdf.exe") {
+				found = path
+				return filepath.SkipAll
+			}
+			return nil
+		})
+		if found != "" {
+			return found
+		}
+	}
+	return ""
+}
+
+func pageList440(indices []int) string {
+	if len(indices) == 0 {
+		return ""
+	}
+	limit := len(indices)
+	if limit > 10 {
+		limit = 10
+	}
+	parts := make([]string, 0, limit+1)
+	for _, idx := range indices[:limit] {
+		parts = append(parts, strconv.Itoa(idx+1))
+	}
+	if len(indices) > limit {
+		parts = append(parts, fmt.Sprintf("+%d trang", len(indices)-limit))
+	}
+	return strings.Join(parts, ", ")
+}
