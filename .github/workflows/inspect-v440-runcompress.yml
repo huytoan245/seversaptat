@@ -1,0 +1,27 @@
+name: Inspect v4.4 runCompress block
+
+on:
+  push:
+    branches:
+      - build/duoi-duoi-pdf-va-nen-file-pdf-v4.4.0-page-500kb-20260929
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+      - name: Print runCompress and helpers
+        working-directory: tools/doi-ten-nen-pdf
+        run: |
+          $ErrorActionPreference='Stop'
+          $b64=(Get-Content -Raw 'main.go.gz.b64').Trim();$bytes=[Convert]::FromBase64String($b64)
+          $ms=[IO.MemoryStream]::new($bytes);$gz=[IO.Compression.GZipStream]::new($ms,[IO.Compression.CompressionMode]::Decompress)
+          $out=[IO.File]::Create((Join-Path $PWD 'main.go'));$gz.CopyTo($out);$out.Dispose();$gz.Dispose();$ms.Dispose()
+          $lines=Get-Content main.go
+          Write-Host '=== lines 790-1045 ==='
+          for($i=789;$i -lt [Math]::Min(1045,$lines.Count);$i++){Write-Host ("{0:D4}: {1}" -f ($i+1),$lines[$i])}
