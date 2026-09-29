@@ -1,0 +1,46 @@
+name: Inspect v4.4 page-aware compression integration points
+
+on:
+  push:
+    branches:
+      - build/duoi-duoi-pdf-va-nen-file-pdf-v4.4.0-page-500kb-20260929
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+      - name: Decode source and print integration points
+        working-directory: tools/doi-ten-nen-pdf
+        run: |
+          $ErrorActionPreference='Stop'
+          $b64=(Get-Content -Raw 'main.go.gz.b64').Trim()
+          $bytes=[Convert]::FromBase64String($b64)
+          $ms=[IO.MemoryStream]::new($bytes)
+          $gz=[IO.Compression.GZipStream]::new($ms,[IO.Compression.CompressionMode]::Decompress)
+          $out=[IO.File]::Create((Join-Path $PWD 'main.go'))
+          $gz.CopyTo($out);$out.Dispose();$gz.Dispose();$ms.Dispose()
+          $lines=Get-Content main.go
+          Write-Host '=== IMPORTS / TOP ==='
+          $lines | Select-Object -First 100 | ForEach-Object { Write-Host $_ }
+          Write-Host '=== compressAuto context ==='
+          $m=Select-String -Path main.go -Pattern 'func compressAuto' | Select-Object -First 1
+          if($m){$s=[Math]::Max(0,$m.LineNumber-8);$e=[Math]::Min($lines.Count-1,$m.LineNumber+120);$lines[$s..$e] | ForEach-Object { Write-Host $_ }}
+          Write-Host '=== compression dispatch / 20MB / skip contexts ==='
+          $patterns=@('compressAuto\(','20\s*\*\s*1024','20\s*MB','under 20','dưới 20','AUTO','Stat\(','Size\(\)')
+          foreach($p in $patterns){
+            Write-Host "--- PATTERN: $p ---"
+            $matches=Select-String -Path main.go -Pattern $p | Select-Object -First 15
+            foreach($x in $matches){
+              $s=[Math]::Max(0,$x.LineNumber-5);$e=[Math]::Min($lines.Count-1,$x.LineNumber+8)
+              Write-Host "@@ line $($x.LineNumber) @@"
+              $lines[$s..$e] | ForEach-Object { Write-Host $_ }
+            }
+          }
