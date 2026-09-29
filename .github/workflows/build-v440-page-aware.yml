@@ -1,0 +1,894 @@
+name: Build v4.4.0 Page-Aware Compression
+
+on:
+  push:
+    branches:
+      - build/duoi-duoi-pdf-va-nen-file-pdf-v4.4.0-page-500kb-20260929
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 50
+    defaults:
+      run:
+        shell: pwsh
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+          cache: false
+
+      - name: Restore source and apply v4.4.0 page-aware AUTO
+        working-directory: tools/doi-ten-nen-pdf
+        run: |
+          $ErrorActionPreference='Stop'
+          $b64=(Get-Content -Raw 'main.go.gz.b64').Trim()
+          $bytes=[Convert]::FromBase64String($b64)
+          $ms=[IO.MemoryStream]::new($bytes)
+          $gz=[IO.Compression.GZipStream]::new($ms,[IO.Compression.CompressionMode]::Decompress)
+          $out=[IO.File]::Create((Join-Path $PWD 'main.go'))
+          $gz.CopyTo($out);$out.Dispose();$gz.Dispose();$ms.Dispose()
+
+          $src=Get-Content -Raw main.go
+          $src=$src.Replace('ĐỔI TÊN - NÉN FILE PDF','ĐUỔI ĐUÔI PDF VÀ NÉN FILE PDF')
+          $src=$src.Replace('Đổi tên - Nén file PDF','Đuổi đuôi PDF và Nén file PDF')
+          foreach($old in @('v4.0.1','v4.0.2','v4.1.0','v4.2.0','v4.2.1','v4.3.0')){$src=$src.Replace($old,'v4.4.0')}
+          $src=$src.Replace('AUTO là mặc định: chọn thư mục → BẮT ĐẦU NÉN. Chỉ AUTO mới bỏ qua file dưới 20 MB.','AUTO: kiểm tra từng trang >500 KB + giới hạn file <20 MB • chỉ ghi 1 lần từ bản gốc • ưu tiên độ nét.')
+
+          $runStart=$src.IndexOf('func runCompress(')
+          $runEnd=$src.IndexOf('func updateCompressProgress',$runStart)
+          if($runStart -lt 0 -or $runEnd -le $runStart){throw 'cannot locate runCompress block'}
+          $newRun=@'
+          func runCompress(ctx context.Context, root string, selected []string, auto bool, manualDPI int) {
+          	type compItem struct {
+          		path string
+          		size int64
+          	}
+          	var candidates []compItem
+          	totalPDF := 0
+          	skipped := 0
+          	failed := 0
+          	totalBefore := int64(0)
+          	totalAfter := int64(0)
+          	last := time.Now().Add(-time.Second)
+
+          	updateState(func(s *WorkerState) {
+          		s.Mode = "compress"
+          		s.Progress = 0
+          		if auto {
+          			s.Engine = "Đang quét nhanh danh sách PDF; bước kiểm tra trang sẽ chạy tuần tự theo từng file..."
+          		} else {
+          			s.Engine = "Đang quét nhanh tên file và dung lượng..."
+          		}
+          		s.Current = "Đang quét thư mục..."
+          		s.Folder = root
+          		s.Stats = "Tổng PDF: 0    •    Cần kiểm tra: 0    •    Bỏ qua: 0    •    Lỗi: 0"
+          	}, true)
+
+          	addPDF := func(path string, size int64) {
+          		totalPDF++
+          		totalBefore += size
+          		// v4.4.0: AUTO must inspect every PDF for per-page size. Metadata scan stays cheap;
+          		// actual PDF parsing is done one file at a time later, so 10k+ files don't explode RAM.
+          		candidates = append(candidates, compItem{path: path, size: size})
+          	}
+
+          	if len(selected) > 0 {
+          		for _, path := range selected {
+          			if ctx.Err() != nil {
+          				finishState("compress", "Đã dừng", "Đã dừng an toàn trong lúc quét file.", false)
+          				return
+          			}
+          			if !strings.EqualFold(filepath.Ext(path), ".pdf") {
+          				continue
+          			}
+          			info, err := os.Stat(path)
+          			if err != nil {
+          				failed++
+          				continue
+          			}
+          			addPDF(path, info.Size())
+          		}
+          	} else {
+          		err := filepath.WalkDir(root, func(path string, d os.DirEntry, walkErr error) error {
+          			if ctx.Err() != nil {
+          				return ctx.Err()
+          			}
+          			if walkErr != nil {
+          				failed++
+          				return nil
+          			}
+          			if d.IsDir() {
+          				return nil
+          			}
+          			name := d.Name()
+          			if strings.HasPrefix(name, ".__DoiTenNenPDF_tmp_") || strings.HasPrefix(name, ".__DoiTenNenPDF_rename_") {
+          				if info, e := d.Info(); e == nil && info.ModTime().Before(time.Now().Add(-24*time.Hour)) {
+          					_ = os.Remove(path)
+          				}
+          				return nil
+          			}
+          			if !strings.EqualFold(filepath.Ext(name), ".pdf") {
+          				return nil
+          			}
+          			info, err := d.Info()
+          			if err != nil {
+          				failed++
+          				return nil
+          			}
+          			addPDF(path, info.Size())
+          			if time.Since(last) >= 200*time.Millisecond {
+          				last = time.Now()
+          				updateState(func(s *WorkerState) {
+          					s.Mode = "compress"
+          					s.Progress = 0
+          					s.Current = fmt.Sprintf("Đã tìm thấy %d PDF", totalPDF)
+          					s.Folder = filepath.Dir(path)
+          					s.Stats = fmt.Sprintf("Tổng PDF: %d    •    Chờ kiểm tra: %d    •    Lỗi: %d", totalPDF, len(candidates), failed)
+          				}, false)
+          			}
+          			return nil
+          		})
+          		if err != nil {
+          			if errors.Is(err, context.Canceled) {
+          				finishState("compress", "Đã dừng", "Đã dừng an toàn trong lúc quét thư mục.", false)
+          			} else {
+          				finishState("compress", "Không thể quét", err.Error(), true)
+          			}
+          			return
+          		}
+          	}
+
+          	sort.Slice(candidates, func(i, j int) bool { return candidates[i].path < candidates[j].path })
+          	if len(candidates) == 0 {
+          		finishState("compress", "Hoàn thành", fmt.Sprintf("Tổng PDF: %d\nKhông có PDF cần xử lý.\nLỗi: %d", totalPDF, failed), failed > 0)
+          		return
+          	}
+
+          	qpdf := ""
+          	if auto {
+          		qpdf = findQPDF()
+          		if qpdf == "" {
+          			finishState("compress", "Thiếu bộ phân tích trang", "Không tìm thấy qpdf.exe tích hợp. File gốc chưa bị thay đổi.", true)
+          			return
+          		}
+          	}
+
+          	updateState(func(s *WorkerState) {
+          		s.Mode = "compress"
+          		s.Progress = 0
+          		s.Engine = fmt.Sprintf("Đã quét xong %d PDF. Đang chuẩn bị bộ nén OFFLINE...", totalPDF)
+          		s.Current = "Kiểm tra bộ nén OFFLINE tích hợp..."
+          		s.Stats = fmt.Sprintf("Tổng PDF: %d    •    Cần kiểm tra/xử lý: %d    •    Lỗi: %d", totalPDF, len(candidates), failed)
+          	}, true)
+
+          	gs, err := ensureGhostscript(ctx, func(msg string, pct int) {
+          		updateState(func(s *WorkerState) {
+          			s.Mode = "compress"
+          			s.Engine = msg
+          			if pct >= 0 {
+          				s.Progress = pct
+          			}
+          		}, false)
+          	})
+          	if err != nil {
+          		if errors.Is(err, context.Canceled) {
+          			finishState("compress", "Đã dừng", "Đã dừng trước khi nén file.", false)
+          		} else {
+          			finishState("compress", "Không chuẩn bị được bộ nén", err.Error(), true)
+          		}
+          		return
+          	}
+          	updateState(func(s *WorkerState) {
+          		s.Engine = "Bộ phân tích trang + bộ nén PDF: OFFLINE • sẵn sàng"
+          		s.Progress = 0
+          	}, true)
+
+          	compressed := 0
+          	pagesScanned := 0
+          	pagesCompressed := 0
+          	for i, it := range candidates {
+          		path := it.path
+          		before := it.size
+          		if ctx.Err() != nil {
+          			finishState("compress", "Đã dừng", fmt.Sprintf("Đã dừng an toàn. Đã xử lý %d file, bỏ qua %d, lỗi %d.", compressed, skipped, failed), false)
+          			return
+          		}
+          		if info, err := os.Stat(path); err != nil {
+          			failed++
+          			totalAfter += it.size
+          			updateCompressProgress440(i, len(candidates), totalPDF, path, compressed, skipped, failed, pagesScanned, pagesCompressed, totalBefore, totalAfter, "Lỗi: không đọc được file")
+          			continue
+          		} else {
+          			before = info.Size()
+          		}
+
+          		signed, encrypted := pdfSensitive(path)
+          		if signed || encrypted {
+          			skipped++
+          			totalAfter += before
+          			reason := "Bỏ qua file nhạy cảm"
+          			if signed {
+          				reason = "Bỏ qua: có chữ ký số"
+          			}
+          			if encrypted {
+          				reason = "Bỏ qua: PDF mã hóa"
+          			}
+          			updateCompressProgress440(i, len(candidates), totalPDF, path, compressed, skipped, failed, pagesScanned, pagesCompressed, totalBefore, totalAfter, reason)
+          			continue
+          		}
+
+          		var result compressionResult
+          		if auto {
+          			result = compressAutoPageAware(ctx, gs, qpdf, path)
+          		} else {
+          			result = compressAtDPI(ctx, gs, path, manualDPI)
+          		}
+          		pagesScanned += result.PagesScanned
+          		pagesCompressed += result.PagesCompressed
+          		if result.Err != nil {
+          			if errors.Is(result.Err, context.Canceled) {
+          				finishState("compress", "Đã dừng", fmt.Sprintf("Đã dừng an toàn. File đang xử lý được giữ nguyên.\nĐã nén %d file, bỏ qua %d, lỗi %d.", compressed, skipped, failed), false)
+          				return
+          			}
+          			failed++
+          			totalAfter += before
+          			updateCompressProgress440(i, len(candidates), totalPDF, path, compressed, skipped, failed, pagesScanned, pagesCompressed, totalBefore, totalAfter, "Lỗi: "+shortErr(result.Err))
+          			continue
+          		}
+          		if !result.Replaced {
+          			skipped++
+          			totalAfter += before
+          			updateCompressProgress440(i, len(candidates), totalPDF, path, compressed, skipped, failed, pagesScanned, pagesCompressed, totalBefore, totalAfter, result.Note)
+          			continue
+          		}
+          		compressed++
+          		totalAfter += result.NewSize
+          		note := fmt.Sprintf("%s: %.2f MB → %.2f MB", result.Note, mb(before), mb(result.NewSize))
+          		updateCompressProgress440(i, len(candidates), totalPDF, path, compressed, skipped, failed, pagesScanned, pagesCompressed, totalBefore, totalAfter, note)
+          	}
+
+          	saved := totalBefore - totalAfter
+          	if saved < 0 {
+          		saved = 0
+          	}
+          	finishState("compress", "Hoàn thành", fmt.Sprintf("Tổng PDF: %d\nĐã thay đổi/nén thành công: %d\nBỏ qua/không cần nén: %d\nLỗi: %d\n\nTổng trang đã kiểm tra: %d\nTrang >500 KB đã tối ưu: %d\n\nDung lượng trước: %.2f MB\nDung lượng sau: %.2f MB\nTiết kiệm: %.2f MB", totalPDF, compressed, skipped, failed, pagesScanned, pagesCompressed, mb(totalBefore), mb(totalAfter), mb(saved)), failed > 0)
+          }
+
+          '@
+          $src=$src.Substring(0,$runStart)+$newRun+$src.Substring($runEnd)
+
+          $updStart=$src.IndexOf('func updateCompressProgress(')
+          $updEnd=$src.IndexOf('func mb(',$updStart)
+          if($updStart -lt 0 -or $updEnd -le $updStart){throw 'cannot locate updateCompressProgress block'}
+          $newUpdate=@'
+          func updateCompressProgress440(i, n, totalPDF int, path string, compressed, skipped, failed, pagesScanned, pagesCompressed int, before, after int64, note string) {
+          	pct := 100
+          	if n > 0 {
+          		pct = (i + 1) * 100 / n
+          	}
+          	updateState(func(s *WorkerState) {
+          		s.Mode = "compress"
+          		s.Progress = pct
+          		s.Current = filepath.Base(path) + " — " + note
+          		s.Folder = filepath.Dir(path)
+          		s.Stats = fmt.Sprintf("PDF: %d    •    Đã xử lý: %d/%d    •    Trang quét: %d    •    Trang >500KB đã tối ưu: %d    •    Bỏ qua: %d    •    Lỗi: %d    •    %.1f → %.1f MB", totalPDF, i+1, n, pagesScanned, pagesCompressed, skipped, failed, mb(before), mb(after))
+          	}, false)
+          }
+          '@
+          $src=$src.Substring(0,$updStart)+$newUpdate+$src.Substring($updEnd)
+
+          $autoStart=$src.IndexOf('type compressionResult struct')
+          $autoEnd=$src.IndexOf('func compressAtDPI',$autoStart)
+          if($autoStart -lt 0 -or $autoEnd -le $autoStart){throw 'cannot locate compression block'}
+          $newAuto=@'
+          type compressionResult struct {
+          	Replaced       bool
+          	NewSize        int64
+          	Note           string
+          	Err            error
+          	PagesScanned   int
+          	PagesCompressed int
+          }
+
+          type autoProfile struct {
+          	dpi     int
+          	quality int
+          	label   string
+          }
+
+          var autoProfiles440 = []autoProfile{
+          	{300, 97, "300 DPI/Q97"},
+          	{300, 94, "300 DPI/Q94"},
+          	{300, 90, "300 DPI/Q90"},
+          	{280, 92, "280 DPI/Q92"},
+          	{260, 90, "260 DPI/Q90"},
+          	{240, 88, "240 DPI/Q88"},
+          	{220, 86, "220 DPI/Q86"},
+          	{200, 84, "200 DPI/Q84"},
+          	{190, 82, "190 DPI/Q82"},
+          	{180, 80, "180 DPI/Q80"},
+          	{170, 78, "170 DPI/Q78"},
+          	{160, 76, "160 DPI/Q76"},
+          	{150, 74, "150 DPI/Q74"},
+          }
+
+          const (
+          	pageHardLimit440 = int64(500 * 1024)
+          	pageTarget440    = int64(480 * 1024)
+          	fileSafeLimit440 = int64(188 * 1024 * 1024 / 10)
+          )
+
+          func compressAutoPageAware(ctx context.Context, gs, qpdf, path string) compressionResult {
+          	orig, err := os.Stat(path)
+          	if err != nil {
+          		return compressionResult{Err: err}
+          	}
+          	origPages := pdfPageCount(ctx, gs, path)
+          	workDir, err := os.MkdirTemp("", "DoiTenNenPDF-v440-pages-")
+          	if err != nil {
+          		return compressionResult{Err: err}
+          	}
+          	defer os.RemoveAll(workDir)
+
+          	pages, err := splitPDFPages440(ctx, qpdf, path, filepath.Join(workDir, "original"))
+          	if err != nil {
+          		return compressionResult{Err: fmt.Errorf("không tách được trang để kiểm tra: %w", err)}
+          	}
+          	resultBase := compressionResult{PagesScanned: len(pages)}
+          	if origPages > 0 && len(pages) != origPages {
+          		resultBase.Err = fmt.Errorf("số trang khi phân tích thay đổi: %d → %d; giữ nguyên file gốc", origPages, len(pages))
+          		return resultBase
+          	}
+
+          	oversized := make([]int, 0)
+          	for i, p := range pages {
+          		if fi, e := os.Stat(p); e != nil {
+          			resultBase.Err = e
+          			return resultBase
+          		} else if fi.Size() > pageHardLimit440 {
+          			oversized = append(oversized, i)
+          		}
+          	}
+
+          	if len(oversized) == 0 && orig.Size() < fileSafeLimit440 {
+          		resultBase.Note = fmt.Sprintf("Không cần nén: %d trang đều ≤500 KB và file %.2f MB", len(pages), mb(orig.Size()))
+          		return resultBase
+          	}
+
+          	// First choice: only replace pages that actually exceed 500 KB. Untouched pages are
+          	// copied from the ORIGINAL PDF. Every trial page is encoded from the original split page,
+          	// never from a previously compressed page: no cumulative/double lossy compression.
+          	if len(oversized) > 0 {
+          		replacements := make(map[int]string, len(oversized))
+          		selectiveOK := true
+          		for _, idx := range oversized {
+          			optimized, _, e := compressPageFromOriginal440(ctx, gs, pages[idx], workDir, idx+1)
+          			if e != nil {
+          				selectiveOK = false
+          				break
+          			}
+          			replacements[idx] = optimized
+          		}
+          		if selectiveOK {
+          			trial, e := tempPDFPath(path)
+          			if e != nil {
+          				resultBase.Err = e
+          				return resultBase
+          			}
+          			defer os.Remove(trial)
+          			if e = mergePagePlan440(ctx, qpdf, path, len(pages), replacements, trial); e == nil && validPDF(trial) {
+          				trialPages := pdfPageCount(ctx, gs, trial)
+          				if origPages <= 0 || trialPages == origPages {
+          					fi, statErr := os.Stat(trial)
+          					if statErr == nil {
+          						maxPage, overCount, verifyErr := verifyPageLimit440(ctx, qpdf, trial, workDir)
+          						if verifyErr == nil && overCount == 0 && fi.Size() < fileSafeLimit440 {
+          							if e = replaceOriginal(path, trial); e != nil {
+          								resultBase.Err = e
+          								return resultBase
+          							}
+          							resultBase.Replaced = true
+          							resultBase.NewSize = fi.Size()
+          							resultBase.PagesCompressed = len(oversized)
+          							resultBase.Note = fmt.Sprintf("AUTO 1 lần từ bản gốc • tối ưu %d/%d trang >500 KB (%s) • trang lớn nhất sau xử lý %.0f KB", len(oversized), len(pages), pageList440(oversized), float64(maxPage)/1024)
+          							return resultBase
+          						}
+          					}
+          				}
+          			}
+          	}
+
+          	// If selective replacement cannot satisfy BOTH rules at once (page <500 KB AND file <20 MB),
+          	// try whole-document profiles. Crucially, every profile starts from the ORIGINAL path.
+          	// We discard failed trials and never feed a trial back into Ghostscript.
+          	whole := compressWholeOriginalVerified440(ctx, gs, qpdf, path, workDir, origPages)
+          	whole.PagesScanned = len(pages)
+          	whole.PagesCompressed = len(oversized)
+          	if whole.Replaced {
+          		if len(oversized) > 0 {
+          			whole.Note = whole.Note + fmt.Sprintf(" • fallback toàn file 1 lần từ bản gốc vì cần đồng thời <20 MB và <500 KB/trang • %d trang gốc >500 KB", len(oversized))
+          		} else {
+          			whole.Note = whole.Note + " • file >20 MB, toàn bộ lần thử đều lấy trực tiếp từ bản gốc"
+          		}
+          	}
+          	return whole
+          }
+
+          func compressPageFromOriginal440(ctx context.Context, gs, sourcePage, workDir string, pageNo int) (string, int64, error) {
+          	var best int64
+          	for attempt, p := range autoProfiles440 {
+          		if ctx.Err() != nil {
+          			return "", 0, ctx.Err()
+          		}
+          		out := filepath.Join(workDir, fmt.Sprintf("optimized-%06d-%02d.pdf", pageNo, attempt))
+          		size, err := runGhostscript(ctx, gs, sourcePage, out, p.dpi, p.quality)
+          		if err != nil {
+          			_ = os.Remove(out)
+          			if errors.Is(err, context.Canceled) {
+          				return "", 0, err
+          			}
+          			continue
+          		}
+          		if !validPDF(out) || pdfPageCount(ctx, gs, out) != 1 {
+          			_ = os.Remove(out)
+          			continue
+          		}
+          		if best == 0 || size < best {
+          			best = size
+          		}
+          		// First profile below 500 KB wins: this is the highest-quality acceptable generation.
+          		// In practice we aim near 480 KB, but never force an extra quality drop just to hit 480 exactly.
+          		if size < pageHardLimit440 {
+          			return out, size, nil
+          		}
+          		_ = os.Remove(out)
+          	}
+          	if best > 0 {
+          		return "", 0, fmt.Errorf("trang %d vẫn %.0f KB sau mức an toàn cuối; không ghi đè file gốc", pageNo, float64(best)/1024)
+          	}
+          	return "", 0, fmt.Errorf("không tạo được bản tối ưu hợp lệ cho trang %d", pageNo)
+          }
+
+          func compressWholeOriginalVerified440(ctx context.Context, gs, qpdf, original, workDir string, origPages int) compressionResult {
+          	orig, err := os.Stat(original)
+          	if err != nil {
+          		return compressionResult{Err: err}
+          	}
+          	var best int64
+          	for attempt, p := range autoProfiles440 {
+          		if ctx.Err() != nil {
+          			return compressionResult{Err: ctx.Err()}
+          		}
+          		trial, err := tempPDFPath(original)
+          		if err != nil {
+          			return compressionResult{Err: err}
+          		}
+          		size, err := runGhostscript(ctx, gs, original, trial, p.dpi, p.quality)
+          		if err != nil {
+          			_ = os.Remove(trial)
+          			if errors.Is(err, context.Canceled) {
+          				return compressionResult{Err: err}
+          			}
+          			continue
+          		}
+          		if !validPDF(trial) {
+          			_ = os.Remove(trial)
+          			continue
+          		}
+          		if outPages := pdfPageCount(ctx, gs, trial); origPages > 0 && outPages > 0 && outPages != origPages {
+          			_ = os.Remove(trial)
+          			return compressionResult{Err: fmt.Errorf("số trang thay đổi sau nén: %d → %d; giữ nguyên file gốc", origPages, outPages)}
+          		}
+          		if best == 0 || size < best {
+          			best = size
+          		}
+          		if size >= orig.Size() || size >= fileSafeLimit440 {
+          			_ = os.Remove(trial)
+          			continue
+          		}
+          		maxPage, overCount, verifyErr := verifyPageLimit440(ctx, qpdf, trial, workDir)
+          		if verifyErr != nil || overCount > 0 {
+          			_ = os.Remove(trial)
+          			continue
+          		}
+          		if err := replaceOriginal(original, trial); err != nil {
+          			_ = os.Remove(trial)
+          			return compressionResult{Err: err}
+          		}
+          		return compressionResult{Replaced: true, NewSize: size, Note: fmt.Sprintf("AUTO %s • file %.2f MB • trang lớn nhất %.0f KB", p.label, mb(size), float64(maxPage)/1024)}
+          	}
+          	if best > 0 {
+          		return compressionResult{Err: fmt.Errorf("không thể đồng thời đạt file <20 MB và mọi trang <500 KB trong ngưỡng chất lượng an toàn (bản thử nhỏ nhất %.2f MB); giữ nguyên file gốc", mb(best))}
+          	}
+          	return compressionResult{Err: errors.New("không tạo được bản PDF tối ưu hợp lệ; giữ nguyên file gốc")}
+          }
+
+          func splitPDFPages440(ctx context.Context, qpdf, input, dir string) ([]string, error) {
+          	if err := os.MkdirAll(dir, 0755); err != nil {
+          		return nil, err
+          	}
+          	pattern := filepath.Join(dir, "page-%d.pdf")
+          	if err := runQPDF440(ctx, qpdf, "--warning-exit-0", "--split-pages", input, pattern); err != nil {
+          		return nil, err
+          	}
+          	pages, err := filepath.Glob(filepath.Join(dir, "page-*.pdf"))
+          	if err != nil {
+          		return nil, err
+          	}
+          	sort.Strings(pages)
+          	if len(pages) == 0 {
+          		return nil, errors.New("qpdf không tạo được trang tách")
+          	}
+          	return pages, nil
+          }
+
+          func verifyPageLimit440(ctx context.Context, qpdf, input, workDir string) (int64, int, error) {
+          	dir, err := os.MkdirTemp(workDir, "verify-")
+          	if err != nil {
+          		return 0, 0, err
+          	}
+          	defer os.RemoveAll(dir)
+          	pages, err := splitPDFPages440(ctx, qpdf, input, dir)
+          	if err != nil {
+          		return 0, 0, err
+          	}
+          	var maxSize int64
+          	over := 0
+          	for _, p := range pages {
+          		fi, err := os.Stat(p)
+          		if err != nil {
+          			return 0, 0, err
+          		}
+          		if fi.Size() > maxSize {
+          			maxSize = fi.Size()
+          		}
+          		if fi.Size() >= pageHardLimit440 {
+          			over++
+          		}
+          	}
+          	return maxSize, over, nil
+          }
+
+          func mergePagePlan440(ctx context.Context, qpdf, original string, pageCount int, replacements map[int]string, output string) error {
+          	args := []string{"--warning-exit-0", original, "--pages"}
+          	for i := 0; i < pageCount; i++ {
+          		if p, ok := replacements[i]; ok {
+          			args = append(args, p, "1")
+          		} else {
+          			args = append(args, ".", strconv.Itoa(i+1))
+          		}
+          	}
+          	args = append(args, "--", output)
+          	return runQPDF440(ctx, qpdf, args...)
+          }
+
+          func runQPDF440(ctx context.Context, qpdf string, args ...string) error {
+          	cmd := exec.CommandContext(ctx, qpdf, args...)
+          	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+          	var stderr strings.Builder
+          	cmd.Stderr = &stderr
+          	if err := cmd.Run(); err != nil {
+          		if ctx.Err() != nil {
+          			return ctx.Err()
+          		}
+          		return fmt.Errorf("qpdf: %v (%s)", err, strings.TrimSpace(stderr.String()))
+          	}
+          	return nil
+          }
+
+          func findQPDF() string {
+          	roots := make([]string, 0, 4)
+          	if wd, err := os.Getwd(); err == nil {
+          		roots = append(roots, wd, filepath.Join(wd, "engine"))
+          	}
+          	if exe, err := os.Executable(); err == nil {
+          		d := filepath.Dir(exe)
+          		roots = append(roots, d, filepath.Join(d, "engine"))
+          	}
+          	seen := map[string]bool{}
+          	for _, root := range roots {
+          		if root == "" || seen[root] {
+          			continue
+          		}
+          		seen[root] = true
+          		if st, err := os.Stat(root); err != nil || !st.IsDir() {
+          			continue
+          		}
+          		found := ""
+          		_ = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+          			if err != nil {
+          				return nil
+          			}
+          			if !d.IsDir() && strings.EqualFold(d.Name(), "qpdf.exe") {
+          				found = path
+          				return filepath.SkipAll
+          			}
+          			return nil
+          		})
+          		if found != "" {
+          			return found
+          		}
+          	}
+          	return ""
+          }
+
+          func pageList440(indices []int) string {
+          	if len(indices) == 0 {
+          		return ""
+          	}
+          	limit := len(indices)
+          	if limit > 10 {
+          		limit = 10
+          	}
+          	parts := make([]string, 0, limit+1)
+          	for _, idx := range indices[:limit] {
+          		parts = append(parts, strconv.Itoa(idx+1))
+          	}
+          	if len(indices) > limit {
+          		parts = append(parts, fmt.Sprintf("+%d trang", len(indices)-limit))
+          	}
+          	return strings.Join(parts, ", ")
+          }
+
+          // Keep v4.3 quality-first whole-file behavior available for compatibility.
+          func compressAuto(ctx context.Context, gs, path string) compressionResult {
+          	origPages := pdfPageCount(ctx, gs, path)
+          	orig, err := os.Stat(path)
+          	if err != nil {
+          		return compressionResult{Err: err}
+          	}
+          	var best int64
+          	for _, p := range autoProfiles440 {
+          		tmp, err := tempPDFPath(path)
+          		if err != nil {
+          			return compressionResult{Err: err}
+          		}
+          		size, err := runGhostscript(ctx, gs, path, tmp, p.dpi, p.quality)
+          		if err != nil {
+          			_ = os.Remove(tmp)
+          			if errors.Is(err, context.Canceled) {
+          				return compressionResult{Err: err}
+          			}
+          			continue
+          		}
+          		if !validPDF(tmp) {
+          			_ = os.Remove(tmp)
+          			continue
+          		}
+          		if outPages := pdfPageCount(ctx, gs, tmp); origPages > 0 && outPages > 0 && outPages != origPages {
+          			_ = os.Remove(tmp)
+          			return compressionResult{Err: fmt.Errorf("số trang thay đổi sau nén: %d → %d; giữ nguyên file gốc", origPages, outPages)}
+          		}
+          		if best == 0 || size < best {
+          			best = size
+          		}
+          		if size >= orig.Size() {
+          			_ = os.Remove(tmp)
+          			continue
+          		}
+          		if size < fileSafeLimit440 {
+          			if err := replaceOriginal(path, tmp); err != nil {
+          				_ = os.Remove(tmp)
+          				return compressionResult{Err: err}
+          			}
+          			return compressionResult{Replaced: true, NewSize: size, Note: "AUTO " + p.label}
+          		}
+          		_ = os.Remove(tmp)
+          	}
+          	if best > 0 {
+          		return compressionResult{Err: fmt.Errorf("đã thử các mức an toàn nhưng file vẫn %.2f MB; giữ nguyên file gốc", mb(best))}
+          	}
+          	return compressionResult{Err: errors.New("không tạo được bản PDF tối ưu hợp lệ")}
+          }
+
+          '@
+          $src=$src.Substring(0,$autoStart)+$newAuto+$src.Substring($autoEnd)
+          Set-Content main.go $src -Encoding utf8
+          "module duoi-duoi-pdf-nen-file-pdf`n`ngo 1.23`n"|Set-Content go.mod -Encoding ascii
+          gofmt -w main.go
+          go vet ./...
+          if($LASTEXITCODE -ne 0){throw 'go vet after patch failed'}
+
+      - name: Stage Ghostscript 10.08.0 offline engine
+        working-directory: tools/doi-ten-nen-pdf
+        run: |
+          $ErrorActionPreference='Stop'
+          $installer=Join-Path $env:RUNNER_TEMP 'gs10080w64.exe'
+          Invoke-WebRequest -Uri 'https://github.com/ArtifexSoftware/ghostpdl-downloads/releases/download/gs10080/gs10080w64.exe' -OutFile $installer -UseBasicParsing
+          $expected='52a91b8bf09298788d7a57b9206127026c23eacd75405f0a131e26dc381dce50'
+          if((Get-FileHash $installer -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expected){throw 'Ghostscript hash mismatch'}
+          $extract=Join-Path $env:RUNNER_TEMP 'gs-v440';Remove-Item $extract -Recurse -Force -ErrorAction SilentlyContinue;New-Item -ItemType Directory -Force $extract|Out-Null
+          $seven=(Get-Command 7z.exe -ErrorAction SilentlyContinue).Source;if(-not $seven){$seven='C:\Program Files\7-Zip\7z.exe'}
+          & $seven x $installer "-o$extract" -y | Out-Null;if($LASTEXITCODE -ne 0){throw '7z Ghostscript failed'}
+          $gs=Get-ChildItem $extract -Recurse -File -Filter gswin64c.exe|Select-Object -First 1;if(-not $gs){throw 'gs missing'}
+          $root=Split-Path (Split-Path $gs.FullName -Parent) -Parent
+          $engine=Join-Path $PWD 'payload\engine\ghostscript-10.08.0';New-Item -ItemType Directory -Force $engine|Out-Null
+          Copy-Item (Join-Path $root '*') $engine -Recurse -Force
+          $bundled=Get-ChildItem $engine -Recurse -File -Filter gswin64c.exe|Select-Object -First 1;& $bundled.FullName --version
+          if($LASTEXITCODE -ne 0){throw 'bundled Ghostscript failed'}
+
+      - name: Stage qpdf 12.4.1 offline page engine
+        working-directory: tools/doi-ten-nen-pdf
+        run: |
+          $ErrorActionPreference='Stop'
+          $zip=Join-Path $env:RUNNER_TEMP 'qpdf-12.4.1-msvc64.zip'
+          Invoke-WebRequest -Uri 'https://github.com/qpdf/qpdf/releases/download/v12.4.1/qpdf-12.4.1-msvc64.zip' -OutFile $zip -UseBasicParsing
+          $expected='3cd016cd433ef7232e42f4c13348a49cc14907a3c7278ef4f99120593126f7a6'
+          $actual=(Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($actual -ne $expected){throw "qpdf hash mismatch: $actual"}
+          $extract=Join-Path $env:RUNNER_TEMP 'qpdf-v440';Remove-Item $extract -Recurse -Force -ErrorAction SilentlyContinue;Expand-Archive -LiteralPath $zip -DestinationPath $extract -Force
+          $q=Get-ChildItem $extract -Recurse -File -Filter qpdf.exe|Select-Object -First 1
+          if(-not $q){throw 'qpdf.exe missing'}
+          $root=Split-Path (Split-Path $q.FullName -Parent) -Parent
+          $engine=Join-Path $PWD 'payload\engine\qpdf-12.4.1';New-Item -ItemType Directory -Force $engine|Out-Null
+          Copy-Item (Join-Path $root '*') $engine -Recurse -Force
+          $bundled=Get-ChildItem $engine -Recurse -File -Filter qpdf.exe|Select-Object -First 1
+          & $bundled.FullName --version
+          if($LASTEXITCODE -ne 0){throw 'bundled qpdf failed'}
+
+      - name: Create Windows resources and build core
+        working-directory: tools/doi-ten-nen-pdf
+        run: |
+          $ErrorActionPreference='Stop';Add-Type -AssemblyName System.Drawing
+          $bmp=[Drawing.Bitmap]::new(256,256);$g=[Drawing.Graphics]::FromImage($bmp);$g.SmoothingMode='AntiAlias';$g.Clear([Drawing.Color]::Transparent)
+          $g.FillEllipse([Drawing.SolidBrush]::new([Drawing.Color]::FromArgb(24,46,76)),8,8,240,240)
+          $g.FillRectangle([Drawing.SolidBrush]::new([Drawing.Color]::FromArgb(250,250,252)),54,34,148,178)
+          $g.FillRectangle([Drawing.SolidBrush]::new([Drawing.Color]::FromArgb(226,53,64)),38,96,180,62)
+          $f=[Drawing.Font]::new('Segoe UI',32,[Drawing.FontStyle]::Bold,[Drawing.GraphicsUnit]::Pixel);$sf=[Drawing.StringFormat]::new();$sf.Alignment='Center';$sf.LineAlignment='Center'
+          $g.DrawString('PDF',$f,[Drawing.SolidBrush]::new([Drawing.Color]::White),[Drawing.RectangleF]::new(38,96,180,62),$sf)
+          $p=[Drawing.Pen]::new([Drawing.Color]::FromArgb(55,190,220),10);$p.StartCap='Round';$p.EndCap='Round';$g.DrawArc($p,82,166,92,54,8,164);$g.DrawLine($p,91,198,112,218);$g.DrawLine($p,91,198,118,196)
+          $png='app-icon-v440.png';$bmp.Save((Join-Path $PWD $png),[Drawing.Imaging.ImageFormat]::Png);$g.Dispose();$bmp.Dispose()
+          $pb=[IO.File]::ReadAllBytes((Join-Path $PWD $png));$fs=[IO.File]::Create((Join-Path $PWD 'app.ico'));$bw=[IO.BinaryWriter]::new($fs);$bw.Write([UInt16]0);$bw.Write([UInt16]1);$bw.Write([UInt16]1);$bw.Write([Byte]0);$bw.Write([Byte]0);$bw.Write([Byte]0);$bw.Write([Byte]0);$bw.Write([UInt16]1);$bw.Write([UInt16]32);$bw.Write([UInt32]$pb.Length);$bw.Write([UInt32]22);$bw.Write([byte[]]$pb);$bw.Dispose();$fs.Dispose()
+          @'
+          <?xml version="1.0" encoding="UTF-8" standalone="yes"?><assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0"><assemblyIdentity version="4.4.0.0" processorArchitecture="amd64" name="NguyenHuyToan.DuoiDuoiPDFNenFilePDF" type="win32"/><description>Đuổi đuôi PDF và Nén file PDF v4.4.0</description><dependency><dependentAssembly><assemblyIdentity type="win32" name="Microsoft.Windows.Common-Controls" version="6.0.0.0" processorArchitecture="*" publicKeyToken="6595b64144ccf1df" language="*"/></dependentAssembly></dependency><application xmlns="urn:schemas-microsoft-com:asm.v3"><windowsSettings><dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true/pm</dpiAware><dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">PerMonitorV2</dpiAwareness><longPathAware xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">true</longPathAware></windowsSettings></application></assembly>
+          '@|Set-Content app.manifest -Encoding utf8
+          go install github.com/akavel/rsrc@latest;$rsrc=Join-Path (go env GOPATH) 'bin\rsrc.exe';& $rsrc -ico app.ico -manifest app.manifest -o rsrc_windows_amd64.syso
+          if($LASTEXITCODE -ne 0){throw 'rsrc failed'}
+          go vet ./...;if($LASTEXITCODE -ne 0){throw 'vet failed'}
+          $core=Join-Path $PWD 'payload\Duoi-duoi-PDF-va-Nen-file-PDF-core.exe';go build -trimpath -ldflags='-s -w -H=windowsgui' -o $core .
+          if($LASTEXITCODE -ne 0){throw 'core build failed'}
+
+      - name: Regression test page limit and no-double-compression
+        working-directory: tools/doi-ten-nen-pdf
+        run: |
+          $ErrorActionPreference='Stop'
+          @'
+          package main
+
+          import (
+              "bytes"
+              "context"
+              "fmt"
+              "os"
+              "path/filepath"
+              "strings"
+              "testing"
+          )
+
+          func testBin440(t *testing.T, name string) string {
+              t.Helper()
+              var found string
+              filepath.WalkDir(filepath.Join("payload", "engine"), func(path string, d os.DirEntry, err error) error {
+                  if err == nil && !d.IsDir() && strings.EqualFold(d.Name(), name) { found = path; return filepath.SkipAll }
+                  return nil
+              })
+              if found == "" { t.Fatalf("%s missing", name) }
+              return found
+          }
+
+          func rawPage440(path string, w, h int, noisy bool) error {
+              var b bytes.Buffer
+              b.WriteString("%PDF-1.4\n")
+              offsets := make([]int, 6)
+              obj := func(n int, body func()) { offsets[n]=b.Len(); fmt.Fprintf(&b, "%d 0 obj\n", n); body(); b.WriteString("\nendobj\n") }
+              obj(1, func(){ b.WriteString("<< /Type /Catalog /Pages 2 0 R >>") })
+              obj(2, func(){ b.WriteString("<< /Type /Pages /Kids [3 0 R] /Count 1 >>") })
+              obj(3, func(){ b.WriteString("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /XObject << /Im0 4 0 R >> >> /Contents 5 0 R >>") })
+              rawLen := w*h*3
+              offsets[4]=b.Len(); b.WriteString("4 0 obj\n"); fmt.Fprintf(&b,"<< /Type /XObject /Subtype /Image /Width %d /Height %d /ColorSpace /DeviceRGB /BitsPerComponent 8 /Length %d >>\nstream\n",w,h,rawLen)
+              row:=make([]byte,w*3); var x uint32=1
+              for y:=0;y<h;y++ { for i:=range row { if noisy { x=x*1664525+1013904223; row[i]=byte(x>>24) } else { row[i]=255 } }; b.Write(row) }
+              b.WriteString("\nendstream\nendobj\n")
+              content:="q 612 0 0 792 0 0 cm /Im0 Do Q\n"
+              obj(5,func(){fmt.Fprintf(&b,"<< /Length %d >>\nstream\n%sendstream",len(content),content)})
+              xr:=b.Len();b.WriteString("xref\n0 6\n0000000000 65535 f \n");for i:=1;i<=5;i++{fmt.Fprintf(&b,"%010d 00000 n \n",offsets[i])};fmt.Fprintf(&b,"trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n",xr)
+              return os.WriteFile(path,b.Bytes(),0644)
+          }
+
+          func TestPageAware440(t *testing.T) {
+              ctx:=context.Background(); gs:=testBin440(t,"gswin64c.exe"); qpdf:=testBin440(t,"qpdf.exe"); d:=t.TempDir()
+              // Three intentionally oversized pages. This makes a >20 MB source after merge.
+              sources:=make([]string,3)
+              for i:=0;i<3;i++ { p:=filepath.Join(d,fmt.Sprintf("src-%d.pdf",i+1)); if err:=rawPage440(p,1900,1500,true);err!=nil{t.Fatal(err)};sources[i]=p }
+              merged:=filepath.Join(d,"combined.pdf")
+              args:=[]string{"--warning-exit-0","--empty","--pages"};for _,p:=range sources{args=append(args,p,"1")};args=append(args,"--",merged)
+              if err:=runQPDF440(ctx,qpdf,args...);err!=nil{t.Fatal(err)}
+              before,_:=os.Stat(merged)
+              r:=compressAutoPageAware(ctx,gs,qpdf,merged)
+              if r.Err!=nil || !r.Replaced { t.Fatalf("page-aware failed: %+v",r) }
+              if r.PagesScanned!=3 || r.PagesCompressed<1 { t.Fatalf("bad page counters: %+v",r) }
+              after,_:=os.Stat(merged)
+              if after.Size()>=fileSafeLimit440 { t.Fatalf("file still >= safe 20MB limit: %d",after.Size()) }
+              wd:=filepath.Join(d,"verify");pages,err:=splitPDFPages440(ctx,qpdf,merged,wd);if err!=nil{t.Fatal(err)}
+              if len(pages)!=3{t.Fatalf("page count changed: %d",len(pages))}
+              for i,p:=range pages{fi,_:=os.Stat(p);if fi.Size()>=pageHardLimit440{t.Fatalf("page %d >=500KB: %d",i+1,fi.Size())}}
+              if !validPDF(merged){t.Fatal("output invalid")}
+              t.Logf("before=%.2fMB after=%.2fMB note=%s",mb(before.Size()),mb(after.Size()),r.Note)
+          }
+
+          func TestPageTargetConstants440(t *testing.T) {
+              if pageHardLimit440 != 500*1024 || pageTarget440 != 480*1024 { t.Fatal("page thresholds changed") }
+              // Architecture guard: AUTO implementation must say trials come from original; accepted result is single generation.
+              b,err:=os.ReadFile("main.go");if err!=nil{t.Fatal(err)};s:=string(b)
+              if !strings.Contains(s,"never feed a trial back into Ghostscript") || !strings.Contains(s,"runGhostscript(ctx, gs, original, trial") { t.Fatal("no-double-compression guard missing") }
+          }
+          '@|Set-Content auto440_test.go -Encoding utf8
+          go test -run 'TestPage(Aware|Target)' -v -timeout 15m
+          if($LASTEXITCODE -ne 0){throw 'v4.4 regression tests failed'}
+          Remove-Item auto440_test.go -Force
+          $p=Start-Process (Join-Path $PWD 'payload\Duoi-duoi-PDF-va-Nen-file-PDF-core.exe') -WorkingDirectory (Join-Path $PWD 'payload') -ArgumentList '--self-test' -Wait -PassThru
+          if($p.ExitCode -ne 0){throw 'core self-test failed'}
+
+      - name: Build single-file offline EXE
+        working-directory: tools/doi-ten-nen-pdf
+        run: |
+          $ErrorActionPreference='Stop'
+          $payload=Join-Path $PWD 'payload';$wrap=Join-Path $PWD 'wrapper440';Remove-Item $wrap -Recurse -Force -ErrorAction SilentlyContinue;New-Item -ItemType Directory -Force $wrap|Out-Null
+          @'
+          ĐUỔI ĐUÔI PDF VÀ NÉN FILE PDF v4.4.0
+          AUTO v4.4.0: quét từng trang bằng qpdf theo dạng trang độc lập. Chỉ trang >500 KB mới cần tối ưu, mục tiêu thực tế gần 480 KB nhưng ưu tiên giữ chất lượng và bắt buộc dưới 500 KB. Đồng thời file đầu ra phải thấp hơn ngưỡng an toàn 20 MB. Nếu một file đồng thời vi phạm cả hai điều kiện, mọi lần thử đều bắt đầu từ bản gốc; app không lấy file đã nén để nén lần hai. File chỉ được thay sau khi PDF hợp lệ, số trang không đổi và hai điều kiện dung lượng cùng đạt. PDF có chữ ký số/mã hóa vẫn được bỏ qua.
+          '@|Set-Content (Join-Path $payload 'HUONG-DAN-v4.4.0.txt') -Encoding utf8
+          $zip=Join-Path $wrap 'payload.zip';Compress-Archive -Path (Join-Path $payload '*') -DestinationPath $zip -CompressionLevel Optimal -Force
+          Copy-Item app.ico $wrap;Copy-Item app-icon-v440.png $wrap
+          Set-Location $wrap
+          @'
+          package main
+          import("archive/zip";"bytes";"crypto/sha256";_ "embed";"encoding/hex";"errors";"fmt";"io";"os";"os/exec";"path/filepath";"strings")
+          //go:embed payload.zip
+          var payload []byte
+          const version="v4.4.0";const core="Duoi-duoi-PDF-va-Nen-file-PDF-core.exe"
+          func hash()string{h:=sha256.Sum256(payload);return hex.EncodeToString(h[:])}
+          func root()string{b:=os.Getenv("LOCALAPPDATA");if b==""{b,_=os.UserCacheDir()};return filepath.Join(b,"DuoiDuoiPDFNenFilePDF",version)}
+          func valid(r string)bool{if _,e:=os.Stat(filepath.Join(r,core));e!=nil{return false};b,e:=os.ReadFile(filepath.Join(r,".payload.sha256"));if e!=nil||strings.TrimSpace(string(b))!=hash(){return false};gs:=false;qpdf:=false;filepath.WalkDir(filepath.Join(r,"engine"),func(p string,d os.DirEntry,e error)error{if e==nil&&!d.IsDir(){if strings.EqualFold(d.Name(),"gswin64c.exe"){gs=true};if strings.EqualFold(d.Name(),"qpdf.exe"){qpdf=true};if gs&&qpdf{return errors.New("done")}};return nil});return gs&&qpdf}
+          func unpack(r string)error{if valid(r){return nil};s:=r+fmt.Sprintf(".stage-%d",os.Getpid());os.RemoveAll(s);if e:=os.MkdirAll(s,0755);e!=nil{return e};z,e:=zip.NewReader(bytes.NewReader(payload),int64(len(payload)));if e!=nil{return e};for _,f:=range z.File{c:=filepath.Clean(f.Name);if c==".."||filepath.IsAbs(c)||strings.HasPrefix(c,".."+string(os.PathSeparator)){return errors.New("unsafe payload")};d:=filepath.Join(s,c);if f.FileInfo().IsDir(){os.MkdirAll(d,0755);continue};os.MkdirAll(filepath.Dir(d),0755);rc,e:=f.Open();if e!=nil{return e};o,e:=os.Create(d);if e!=nil{rc.Close();return e};_,ce:=io.Copy(o,rc);o.Close();rc.Close();if ce!=nil{return ce}};if e:=os.WriteFile(filepath.Join(s,".payload.sha256"),[]byte(hash()),0644);e!=nil{return e};os.RemoveAll(r);return os.Rename(s,r)}
+          func main(){r:=root();if e:=unpack(r);e!=nil{os.Exit(11)};c:=exec.Command(filepath.Join(r,core),os.Args[1:]...);c.Dir=r;if e:=c.Start();e!=nil{os.Exit(12)};if len(os.Args)>1&&os.Args[1]=="--self-test"{if e:=c.Wait();e!=nil{if x,ok:=e.(*exec.ExitError);ok{os.Exit(x.ExitCode())};os.Exit(13)}}else{_ = c.Process.Release()}}
+          '@|Set-Content main.go -Encoding utf8
+          "module single440`n`ngo 1.23`n"|Set-Content go.mod -Encoding ascii
+          @'
+          <?xml version="1.0" encoding="UTF-8" standalone="yes"?><assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0"><assemblyIdentity version="4.4.0.0" processorArchitecture="amd64" name="NguyenHuyToan.DuoiDuoiPDFNenFilePDF.Single" type="win32"/><description>Đuổi đuôi PDF và Nén file PDF v4.4.0</description><application xmlns="urn:schemas-microsoft-com:asm.v3"><windowsSettings><dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true/pm</dpiAware><dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">PerMonitorV2</dpiAwareness></windowsSettings></application></assembly>
+          '@|Set-Content app.manifest -Encoding utf8
+          go install github.com/akavel/rsrc@latest;$rsrc=Join-Path (go env GOPATH) 'bin\rsrc.exe';& $rsrc -ico app.ico -manifest app.manifest -o rsrc_windows_amd64.syso
+          gofmt -w main.go;go vet ./...
+          $exe='Duoi-duoi-PDF-va-Nen-file-PDF-v4.4.0-SINGLE-EXE.exe';go build -trimpath -ldflags='-s -w -H=windowsgui' -o $exe .
+          if($LASTEXITCODE -ne 0){throw 'wrapper build failed'}
+
+      - name: Validate final EXE first-run and cached-run
+        working-directory: tools/doi-ten-nen-pdf/wrapper440
+        run: |
+          $ErrorActionPreference='Stop'
+          $exe=Join-Path $PWD 'Duoi-duoi-PDF-va-Nen-file-PDF-v4.4.0-SINGLE-EXE.exe'
+          $cache=Join-Path $env:LOCALAPPDATA 'DuoiDuoiPDFNenFilePDF\v4.4.0';Remove-Item $cache -Recurse -Force -ErrorAction SilentlyContinue
+          $p=Start-Process $exe -ArgumentList '--self-test' -Wait -PassThru;if($p.ExitCode -ne 0){throw "first run failed $($p.ExitCode)"}
+          if(-not (Get-ChildItem $cache -Recurse -File -Filter qpdf.exe -ErrorAction SilentlyContinue)){throw 'qpdf missing after first-run extraction'}
+          if(-not (Get-ChildItem $cache -Recurse -File -Filter gswin64c.exe -ErrorAction SilentlyContinue)){throw 'Ghostscript missing after first-run extraction'}
+          $p2=Start-Process $exe -ArgumentList '--self-test' -Wait -PassThru;if($p2.ExitCode -ne 0){throw 'cached run failed'}
+          $h=(Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant();"$exe  $h"|Set-Content CHECKSUM.txt -Encoding ascii;Write-Host "SHA256=$h"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Duoi-duoi-PDF-va-Nen-file-PDF-v4.4.0-SINGLE-EXE
+          path: |
+            tools/doi-ten-nen-pdf/wrapper440/Duoi-duoi-PDF-va-Nen-file-PDF-v4.4.0-SINGLE-EXE.exe
+            tools/doi-ten-nen-pdf/wrapper440/CHECKSUM.txt
+            tools/doi-ten-nen-pdf/wrapper440/app-icon-v440.png
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
