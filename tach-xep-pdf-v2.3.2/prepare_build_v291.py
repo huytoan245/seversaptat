@@ -3,14 +3,14 @@ p=Path('tach-xep-pdf-v2.3.2/build_v232.ps1')
 s=p.read_text(encoding='utf-8-sig')
 
 old="; & python (Join-Path $Project 'patch_v290_layout_fix.py'); if ($LASTEXITCODE -ne 0) { throw 'patch_v290_layout_fix.py failed' } }"
-new="; & python (Join-Path $Project 'patch_v290_layout_fix.py'); if ($LASTEXITCODE -ne 0) { throw 'patch_v290_layout_fix.py failed' }; & python (Join-Path $Project 'patch_v291.py'); if ($LASTEXITCODE -ne 0) { throw 'patch_v291.py failed' } }"
+new="; & python (Join-Path $Project 'patch_v290_layout_fix.py'); if ($LASTEXITCODE -ne 0) { throw 'patch_v290_layout_fix.py failed' }; & python (Join-Path $Project 'patch_v291.py'); if ($LASTEXITCODE -ne 0) { throw 'patch_v291.py failed' }; & python (Join-Path $Project 'patch_v291_launcher.py'); if ($LASTEXITCODE -ne 0) { throw 'patch_v291_launcher.py failed' } }"
 if old not in s: raise SystemExit('v2.9 final patch-chain marker missing')
 s=s.replace(old,new,1)
 
 s=s.replace('release-v2.9.0','release-v2.9.1').replace('v2.9.0','v2.9.1').replace('2.9.0','2.9.1')
 
 old_snapshot="(Join-Path $Project 'patch_v290.py'), (Join-Path $Project 'patch_v290_layout_fix.py'), (Join-Path $Project 'prepare_build_v290.py'), (Join-Path $Project 'regression_test.py'),"
-new_snapshot="(Join-Path $Project 'patch_v290.py'), (Join-Path $Project 'patch_v290_layout_fix.py'), (Join-Path $Project 'prepare_build_v290.py'), (Join-Path $Project 'patch_v291.py'), (Join-Path $Project 'prepare_build_v291.py'), (Join-Path $Project 'regression_test.py'),"
+new_snapshot="(Join-Path $Project 'patch_v290.py'), (Join-Path $Project 'patch_v290_layout_fix.py'), (Join-Path $Project 'prepare_build_v290.py'), (Join-Path $Project 'patch_v291.py'), (Join-Path $Project 'patch_v291_launcher.py'), (Join-Path $Project 'prepare_build_v291.py'), (Join-Path $Project 'regression_test.py'),"
 if old_snapshot not in s: raise SystemExit('v2.9 source snapshot marker missing')
 s=s.replace(old_snapshot,new_snapshot,1)
 
