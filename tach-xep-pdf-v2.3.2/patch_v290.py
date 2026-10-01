@@ -1,5 +1,5 @@
 from pathlib import Path
-root=Path('.')
+root=Path('tach-xep-pdf-v2.3.2')
 p=root/'TachXepTrangPDF.cs'
 s=p.read_text(encoding='utf-8-sig')
 
