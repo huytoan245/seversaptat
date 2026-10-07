@@ -1,0 +1,279 @@
+func runCompress(ctx context.Context, root string, selected []string, auto bool, manualDPI int) {
+	type compItem struct {
+		path string
+		size int64
+	}
+	type compOutcome struct {
+		path       string
+		before     int64
+		result     compressionResult
+		skipReason string
+	}
+
+	var candidates []compItem
+	totalPDF := 0
+	skipped := 0
+	failed := 0
+	totalBefore := int64(0)
+	totalAfter := int64(0)
+	last := time.Now().Add(-time.Second)
+	seenPDF := map[string]bool{}
+
+	updateState(func(s *WorkerState) {
+		s.Mode = "compress"
+		s.Progress = 0
+		if auto {
+			s.Engine = "Đang quét nhanh danh sách PDF. Sau đó kiểm tra <20 MB/file và <1 MB/trang..."
+		} else {
+			s.Engine = "Đang quét nhanh tên file và dung lượng..."
+		}
+		s.Current = "Đang quét thư mục..."
+		s.Folder = root
+		s.Stats = "Tổng PDF: 0    •    Chờ kiểm tra: 0    •    Bỏ qua: 0    •    Lỗi: 0"
+	}, true)
+
+	addPDF := func(path string, size int64) {
+		key := strings.ToLower(filepath.Clean(path))
+		if seenPDF[key] {
+			return
+		}
+		seenPDF[key] = true
+		totalPDF++
+		totalBefore += size
+		// AUTO must inspect every PDF because even a file below 20 MB can contain
+		// an individual page >=1 MB. Only path + metadata are queued here.
+		candidates = append(candidates, compItem{path: path, size: size})
+	}
+
+	if len(selected) > 0 {
+		for _, path := range selected {
+			if ctx.Err() != nil {
+				finishState("compress", "Đã dừng", "Đã dừng an toàn trong lúc quét file.", false)
+				return
+			}
+			if !strings.EqualFold(filepath.Ext(path), ".pdf") {
+				continue
+			}
+			info, err := os.Stat(path)
+			if err != nil {
+				failed++
+				continue
+			}
+			addPDF(path, info.Size())
+		}
+	} else {
+		err := filepath.WalkDir(root, func(path string, d os.DirEntry, walkErr error) error {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			if walkErr != nil {
+				failed++
+				return nil
+			}
+			if d.IsDir() {
+				return nil
+			}
+			name := d.Name()
+			if strings.HasPrefix(name, ".__DoiTenNenPDF_tmp_") || strings.HasPrefix(name, ".__DoiTenNenPDF_rename_") {
+				if info, e := d.Info(); e == nil && info.ModTime().Before(time.Now().Add(-24*time.Hour)) {
+					_ = os.Remove(path)
+				}
+				return nil
+			}
+			if !strings.EqualFold(filepath.Ext(name), ".pdf") {
+				return nil
+			}
+			info, err := d.Info()
+			if err != nil {
+				failed++
+				return nil
+			}
+			addPDF(path, info.Size())
+			if time.Since(last) >= 200*time.Millisecond {
+				last = time.Now()
+				updateState(func(s *WorkerState) {
+					s.Mode = "compress"
+					s.Progress = 0
+					s.Current = fmt.Sprintf("Đã tìm thấy %d PDF", totalPDF)
+					s.Folder = filepath.Dir(path)
+					s.Stats = fmt.Sprintf("Tổng PDF: %d    •    Chờ kiểm tra: %d    •    Lỗi: %d", totalPDF, len(candidates), failed)
+				}, false)
+			}
+			return nil
+		})
+		if err != nil {
+			if errors.Is(err, context.Canceled) {
+				finishState("compress", "Đã dừng", "Đã dừng an toàn trong lúc quét thư mục.", false)
+			} else {
+				finishState("compress", "Không thể quét", err.Error(), true)
+			}
+			return
+		}
+	}
+
+	sort.Slice(candidates, func(i, j int) bool { return candidates[i].path < candidates[j].path })
+	if len(candidates) == 0 {
+		finishState("compress", "Hoàn thành", fmt.Sprintf("Tổng PDF: %d\nKhông có PDF để xử lý.\nLỗi: %d", totalPDF, failed), failed > 0)
+		return
+	}
+
+	qpdf := ""
+	if auto {
+		qpdf = findQPDF450()
+		if qpdf == "" {
+			finishState("compress", "Thiếu bộ phân tích trang", "Không tìm thấy qpdf.exe tích hợp. File gốc chưa bị thay đổi.", true)
+			return
+		}
+	}
+
+	updateState(func(s *WorkerState) {
+		s.Mode = "compress"
+		s.Progress = 0
+		s.Engine = fmt.Sprintf("Đã quét xong %d PDF. Đang chuẩn bị bộ nén OFFLINE...", totalPDF)
+		s.Current = "Kiểm tra bộ nén OFFLINE tích hợp..."
+		s.Stats = fmt.Sprintf("Tổng PDF: %d    •    Cần kiểm tra/xử lý: %d    •    Lỗi: %d", totalPDF, len(candidates), failed)
+	}, true)
+
+	gs, err := ensureGhostscript(ctx, func(msg string, pct int) {
+		updateState(func(s *WorkerState) {
+			s.Mode = "compress"
+			s.Engine = msg
+			if pct >= 0 {
+				s.Progress = pct
+			}
+		}, false)
+	})
+	if err != nil {
+		if errors.Is(err, context.Canceled) {
+			finishState("compress", "Đã dừng", "Đã dừng trước khi nén file.", false)
+		} else {
+			finishState("compress", "Không chuẩn bị được bộ nén", err.Error(), true)
+		}
+		return
+	}
+
+	workerCount := 1
+	if auto && len(candidates) > 1 {
+		// Two independent PDF workers give a large speed-up on big collections
+		// without spawning excessive Ghostscript/qpdf processes or exhausting RAM.
+		workerCount = 2
+	}
+	updateState(func(s *WorkerState) {
+		if auto {
+			s.Engine = fmt.Sprintf("Bộ phân tích trang + nén PDF: OFFLINE • %d luồng xử lý song song", workerCount)
+		} else {
+			s.Engine = "Bộ nén PDF: OFFLINE • sẵn sàng"
+		}
+		s.Progress = 0
+	}, true)
+
+	jobs := make(chan compItem, len(candidates))
+	results := make(chan compOutcome, len(candidates))
+	for _, it := range candidates {
+		jobs <- it
+	}
+	close(jobs)
+
+	worker := func() {
+		for it := range jobs {
+			out := compOutcome{path: it.path, before: it.size}
+			if ctx.Err() != nil {
+				out.result.Err = ctx.Err()
+				results <- out
+				continue
+			}
+
+			info, statErr := os.Stat(it.path)
+			if statErr != nil {
+				out.result.Err = statErr
+				results <- out
+				continue
+			}
+			out.before = info.Size()
+
+			signed, encrypted := pdfSensitive(it.path)
+			if signed || encrypted {
+				out.skipReason = "Bỏ qua file nhạy cảm"
+				if signed {
+					out.skipReason = "Bỏ qua: có chữ ký số"
+				}
+				if encrypted {
+					out.skipReason = "Bỏ qua: PDF mã hóa"
+				}
+				results <- out
+				continue
+			}
+
+			if auto {
+				out.result = compressAutoPageAware450(ctx, gs, qpdf, it.path)
+			} else {
+				out.result = compressAtDPI(ctx, gs, it.path, manualDPI)
+			}
+			results <- out
+		}
+	}
+
+	for w := 0; w < workerCount; w++ {
+		go worker()
+	}
+
+	compressed := 0
+	pagesScanned := 0
+	pagesCompressed := 0
+	for completed := 1; completed <= len(candidates); completed++ {
+		out := <-results
+		before := out.before
+		pagesScanned += out.result.PagesScanned
+		pagesCompressed += out.result.PagesCompressed
+
+		if out.skipReason != "" {
+			skipped++
+			totalAfter += before
+			updateCompressProgress450(completed, len(candidates), totalPDF, out.path, compressed, skipped, failed, pagesScanned, pagesCompressed, totalBefore, totalAfter, out.skipReason)
+			continue
+		}
+
+		if out.result.Err != nil {
+			if errors.Is(out.result.Err, context.Canceled) {
+				finishState("compress", "Đã dừng", fmt.Sprintf("Đã dừng an toàn. File đang xử lý được giữ nguyên.\nĐã nén %d file, bỏ qua %d, lỗi %d.", compressed, skipped, failed), false)
+				return
+			}
+			failed++
+			totalAfter += before
+			updateCompressProgress450(completed, len(candidates), totalPDF, out.path, compressed, skipped, failed, pagesScanned, pagesCompressed, totalBefore, totalAfter, "Lỗi: "+shortErr(out.result.Err))
+			continue
+		}
+
+		if !out.result.Replaced {
+			skipped++
+			totalAfter += before
+			updateCompressProgress450(completed, len(candidates), totalPDF, out.path, compressed, skipped, failed, pagesScanned, pagesCompressed, totalBefore, totalAfter, out.result.Note)
+			continue
+		}
+
+		compressed++
+		totalAfter += out.result.NewSize
+		note := fmt.Sprintf("%s: %.2f MB → %.2f MB", out.result.Note, mb(before), mb(out.result.NewSize))
+		updateCompressProgress450(completed, len(candidates), totalPDF, out.path, compressed, skipped, failed, pagesScanned, pagesCompressed, totalBefore, totalAfter, note)
+	}
+
+	saved := totalBefore - totalAfter
+	if saved < 0 {
+		saved = 0
+	}
+	finishState("compress", "Hoàn thành", fmt.Sprintf("Tổng PDF: %d\nĐã thay đổi/nén thành công: %d\nBỏ qua/không cần nén: %d\nLỗi: %d\n\nTổng trang đã kiểm tra: %d\nTrang gốc ≥1 MB đã tối ưu: %d\n\nDung lượng trước: %.2f MB\nDung lượng sau: %.2f MB\nTiết kiệm: %.2f MB", totalPDF, compressed, skipped, failed, pagesScanned, pagesCompressed, mb(totalBefore), mb(totalAfter), mb(saved)), failed > 0)
+}
+
+func updateCompressProgress450(done, n, totalPDF int, path string, compressed, skipped, failed, pagesScanned, pagesCompressed int, before, after int64, note string) {
+	pct := 100
+	if n > 0 {
+		pct = done * 100 / n
+	}
+	updateState(func(s *WorkerState) {
+		s.Mode = "compress"
+		s.Progress = pct
+		s.Current = filepath.Base(path) + " — " + note
+		s.Folder = filepath.Dir(path)
+		s.Stats = fmt.Sprintf("PDF: %d    •    Đã xử lý: %d/%d    •    Trang quét: %d    •    Trang ≥1MB đã tối ưu: %d    •    Bỏ qua: %d    •    Lỗi: %d    •    %.1f → %.1f MB", totalPDF, done, n, pagesScanned, pagesCompressed, skipped, failed, mb(before), mb(after))
+	}, false)
+}
