@@ -1,0 +1,385 @@
+type compressionResult struct {
+	Replaced        bool
+	NewSize         int64
+	Note            string
+	Err             error
+	PagesScanned    int
+	PagesCompressed int
+}
+
+type autoProfile450 struct {
+	dpi     int
+	quality int
+	label   string
+}
+
+// Quality-first ladder. Every attempt starts from the ORIGINAL page/PDF.
+// The first generation that satisfies the threshold wins. We never keep
+// lowering quality just to make an already-valid page/file smaller.
+var autoProfiles450 = []autoProfile450{
+	{300, 98, "300 DPI/Q98"},
+	{300, 96, "300 DPI/Q96"},
+	{300, 94, "300 DPI/Q94"},
+	{300, 92, "300 DPI/Q92"},
+	{280, 94, "280 DPI/Q94"},
+	{260, 92, "260 DPI/Q92"},
+	{240, 90, "240 DPI/Q90"},
+	{220, 88, "220 DPI/Q88"},
+	{200, 86, "200 DPI/Q86"},
+	{180, 84, "180 DPI/Q84 • dự phòng chất lượng"},
+}
+
+const (
+	// Decimal limits are deliberate: the destination system is described as
+	// "<20 MB" and "<1 MB/page". Equality is treated as over the limit.
+	pageHardLimit450 = int64(1_000_000)
+	fileHardLimit450 = int64(20_000_000)
+)
+
+func compressAutoPageAware450(ctx context.Context, gs, qpdf, path string) compressionResult {
+	orig, err := os.Stat(path)
+	if err != nil {
+		return compressionResult{Err: err}
+	}
+	origPages := pdfPageCount(ctx, gs, path)
+	workDir, err := os.MkdirTemp("", "DoiTenNenPDF-v450-pages-")
+	if err != nil {
+		return compressionResult{Err: err}
+	}
+	defer os.RemoveAll(workDir)
+
+	pages, err := splitPDFPages450(ctx, qpdf, path, filepath.Join(workDir, "original"))
+	if err != nil {
+		return compressionResult{Err: fmt.Errorf("không tách được trang để kiểm tra: %w", err)}
+	}
+	base := compressionResult{PagesScanned: len(pages)}
+	if origPages > 0 && len(pages) != origPages {
+		base.Err = fmt.Errorf("số trang khi phân tích thay đổi: %d → %d; giữ nguyên file gốc", origPages, len(pages))
+		return base
+	}
+
+	oversized := make([]int, 0)
+	for i, p := range pages {
+		fi, statErr := os.Stat(p)
+		if statErr != nil {
+			base.Err = statErr
+			return base
+		}
+		if fi.Size() >= pageHardLimit450 {
+			oversized = append(oversized, i)
+		}
+	}
+
+	// Fast exit: the PDF already satisfies BOTH rules, so it is not rewritten.
+	if len(oversized) == 0 && orig.Size() < fileHardLimit450 {
+		base.Note = fmt.Sprintf("Không cần nén: %d trang đều <1 MB và file %.2f MB", len(pages), mb(orig.Size()))
+		return base
+	}
+
+	// Preferred path: when one or more pages are >=1 MB, touch ONLY those pages.
+	// Every candidate is generated from its ORIGINAL split page; untouched pages
+	// are copied losslessly from the original PDF. This is one compression
+	// generation, not "compress file then compress pages again".
+	if len(oversized) > 0 {
+		replacements := make(map[int]string, len(oversized))
+		selectiveOK := true
+		for _, idx := range oversized {
+			optimized, _, optimizeErr := compressPageFromOriginal450(ctx, gs, pages[idx], workDir, idx+1)
+			if optimizeErr != nil {
+				selectiveOK = false
+				break
+			}
+			replacements[idx] = optimized
+		}
+
+		if selectiveOK {
+			trial, tempErr := tempPDFPath(path)
+			if tempErr != nil {
+				base.Err = tempErr
+				return base
+			}
+			_ = os.Remove(trial)
+			defer os.Remove(trial)
+
+			mergeErr := mergePagePlan450(ctx, qpdf, path, len(pages), replacements, trial)
+			if mergeErr == nil && validPDF(trial) {
+				trialPages := pdfPageCount(ctx, gs, trial)
+				if origPages <= 0 || trialPages == origPages {
+					fi, statErr := os.Stat(trial)
+					if statErr == nil {
+						maxPage, overCount, verifyErr := verifyPageLimit450(ctx, qpdf, trial, workDir)
+						if verifyErr == nil && overCount == 0 && fi.Size() < fileHardLimit450 {
+							if replaceErr := replaceOriginal(path, trial); replaceErr != nil {
+								base.Err = replaceErr
+								return base
+							}
+							base.Replaced = true
+							base.NewSize = fi.Size()
+							base.PagesCompressed = len(oversized)
+							base.Note = fmt.Sprintf("AUTO chất lượng cao • tối ưu %d/%d trang ≥1 MB (%s) • trang lớn nhất sau xử lý %.0f KB", len(oversized), len(pages), pageList450(oversized), float64(maxPage)/1024)
+							return base
+						}
+					}
+				}
+			}
+		}
+
+		// If the total file was already below 20 MB, do not degrade every page
+		// merely because one hard page could not be reduced safely enough.
+		if orig.Size() < fileHardLimit450 {
+			base.PagesCompressed = 0
+			base.Err = errors.New("có trang ≥1 MB nhưng chưa thể đưa xuống <1 MB trong các mức chất lượng an toàn; giữ nguyên file gốc")
+			return base
+		}
+	}
+
+	// Whole-file fallback is used only when the ORIGINAL PDF itself is >=20 MB.
+	// Every profile below starts again from ORIGINAL path. A compressed trial is
+	// NEVER used as input to another Ghostscript pass: no cumulative quality loss.
+	whole := compressWholeOriginalVerified450(ctx, gs, qpdf, path, workDir, origPages)
+	whole.PagesScanned = len(pages)
+	whole.PagesCompressed = len(oversized)
+	if whole.Replaced {
+		if len(oversized) > 0 {
+			whole.Note += fmt.Sprintf(" • file gốc ≥20 MB và %d trang gốc ≥1 MB; bản cuối được tạo trực tiếp từ file gốc", len(oversized))
+		} else {
+			whole.Note += " • file gốc ≥20 MB; mọi lần thử đều lấy trực tiếp từ file gốc"
+		}
+	}
+	return whole
+}
+
+func compressPageFromOriginal450(ctx context.Context, gs, sourcePage, workDir string, pageNo int) (string, int64, error) {
+	var bestSize int64
+	for attempt, p := range autoProfiles450 {
+		if ctx.Err() != nil {
+			return "", 0, ctx.Err()
+		}
+		out := filepath.Join(workDir, fmt.Sprintf("optimized-%06d-%02d.pdf", pageNo, attempt))
+		size, err := runGhostscript(ctx, gs, sourcePage, out, p.dpi, p.quality)
+		if err != nil {
+			_ = os.Remove(out)
+			if errors.Is(err, context.Canceled) {
+				return "", 0, err
+			}
+			continue
+		}
+		if !validPDF(out) || pdfPageCount(ctx, gs, out) != 1 {
+			_ = os.Remove(out)
+			continue
+		}
+		if bestSize == 0 || size < bestSize {
+			bestSize = size
+		}
+
+		// FIRST valid result wins. No target like 900 KB is enforced because
+		// quality matters more than chasing a particular smaller number.
+		if size < pageHardLimit450 {
+			return out, size, nil
+		}
+		_ = os.Remove(out)
+	}
+	if bestSize > 0 {
+		return "", 0, fmt.Errorf("trang %d vẫn %.0f KB sau mức chất lượng dự phòng; giữ nguyên file gốc thay vì nén quá mạnh", pageNo, float64(bestSize)/1024)
+	}
+	return "", 0, fmt.Errorf("không tạo được bản tối ưu hợp lệ cho trang %d", pageNo)
+}
+
+func compressWholeOriginalVerified450(ctx context.Context, gs, qpdf, original, workDir string, origPages int) compressionResult {
+	orig, err := os.Stat(original)
+	if err != nil {
+		return compressionResult{Err: err}
+	}
+	var bestSize int64
+	for _, p := range autoProfiles450 {
+		if ctx.Err() != nil {
+			return compressionResult{Err: ctx.Err()}
+		}
+
+		trial, tempErr := tempPDFPath(original)
+		if tempErr != nil {
+			return compressionResult{Err: tempErr}
+		}
+		size, runErr := runGhostscript(ctx, gs, original, trial, p.dpi, p.quality)
+		if runErr != nil {
+			_ = os.Remove(trial)
+			if errors.Is(runErr, context.Canceled) {
+				return compressionResult{Err: runErr}
+			}
+			continue
+		}
+		if !validPDF(trial) {
+			_ = os.Remove(trial)
+			continue
+		}
+		if outPages := pdfPageCount(ctx, gs, trial); origPages > 0 && outPages > 0 && outPages != origPages {
+			_ = os.Remove(trial)
+			return compressionResult{Err: fmt.Errorf("số trang thay đổi sau nén: %d → %d; giữ nguyên file gốc", origPages, outPages)}
+		}
+		if bestSize == 0 || size < bestSize {
+			bestSize = size
+		}
+		if size >= orig.Size() || size >= fileHardLimit450 {
+			_ = os.Remove(trial)
+			continue
+		}
+
+		maxPage, overCount, verifyErr := verifyPageLimit450(ctx, qpdf, trial, workDir)
+		if verifyErr != nil || overCount > 0 {
+			_ = os.Remove(trial)
+			continue
+		}
+		if replaceErr := replaceOriginal(original, trial); replaceErr != nil {
+			_ = os.Remove(trial)
+			return compressionResult{Err: replaceErr}
+		}
+		return compressionResult{
+			Replaced: true,
+			NewSize:  size,
+			Note:     fmt.Sprintf("AUTO %s • file %.2f MB • trang lớn nhất %.0f KB", p.label, mb(size), float64(maxPage)/1024),
+		}
+	}
+
+	if bestSize > 0 {
+		return compressionResult{Err: fmt.Errorf("chưa thể đồng thời đạt file <20 MB và mọi trang <1 MB trong các mức chất lượng an toàn (bản thử nhỏ nhất %.2f MB); giữ nguyên file gốc", mb(bestSize))}
+	}
+	return compressionResult{Err: errors.New("không tạo được bản PDF tối ưu hợp lệ; giữ nguyên file gốc")}
+}
+
+func splitPDFPages450(ctx context.Context, qpdf, input, dir string) ([]string, error) {
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return nil, err
+	}
+	pattern := filepath.Join(dir, "page-%d.pdf")
+	if err := runQPDF450(ctx, qpdf, "--warning-exit-0", "--split-pages", input, pattern); err != nil {
+		return nil, err
+	}
+	pages, err := filepath.Glob(filepath.Join(dir, "page-*.pdf"))
+	if err != nil {
+		return nil, err
+	}
+	if len(pages) == 0 {
+		return nil, errors.New("qpdf không tạo được trang tách")
+	}
+	sort.Slice(pages, func(i, j int) bool { return splitPageNumber450(pages[i]) < splitPageNumber450(pages[j]) })
+	return pages, nil
+}
+
+func splitPageNumber450(path string) int {
+	name := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
+	idx := strings.LastIndex(name, "-")
+	if idx < 0 || idx+1 >= len(name) {
+		return 0
+	}
+	n, _ := strconv.Atoi(name[idx+1:])
+	return n
+}
+
+func verifyPageLimit450(ctx context.Context, qpdf, input, workDir string) (int64, int, error) {
+	dir, err := os.MkdirTemp(workDir, "verify-")
+	if err != nil {
+		return 0, 0, err
+	}
+	defer os.RemoveAll(dir)
+	pages, err := splitPDFPages450(ctx, qpdf, input, dir)
+	if err != nil {
+		return 0, 0, err
+	}
+	var maxSize int64
+	over := 0
+	for _, p := range pages {
+		fi, statErr := os.Stat(p)
+		if statErr != nil {
+			return 0, 0, statErr
+		}
+		if fi.Size() > maxSize {
+			maxSize = fi.Size()
+		}
+		if fi.Size() >= pageHardLimit450 {
+			over++
+		}
+	}
+	return maxSize, over, nil
+}
+
+func mergePagePlan450(ctx context.Context, qpdf, original string, pageCount int, replacements map[int]string, output string) error {
+	args := []string{"--warning-exit-0", original, "--pages"}
+	for i := 0; i < pageCount; i++ {
+		if replacement, ok := replacements[i]; ok {
+			args = append(args, replacement, "1")
+		} else {
+			args = append(args, ".", strconv.Itoa(i+1))
+		}
+	}
+	args = append(args, "--", output)
+	return runQPDF450(ctx, qpdf, args...)
+}
+
+func runQPDF450(ctx context.Context, qpdf string, args ...string) error {
+	cmd := exec.CommandContext(ctx, qpdf, args...)
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		return fmt.Errorf("qpdf: %v (%s)", err, strings.TrimSpace(stderr.String()))
+	}
+	return nil
+}
+
+func findQPDF450() string {
+	roots := make([]string, 0, 4)
+	if wd, err := os.Getwd(); err == nil {
+		roots = append(roots, wd, filepath.Join(wd, "engine"))
+	}
+	if exe, err := os.Executable(); err == nil {
+		dir := filepath.Dir(exe)
+		roots = append(roots, dir, filepath.Join(dir, "engine"))
+	}
+
+	seen := map[string]bool{}
+	for _, root := range roots {
+		if root == "" || seen[root] {
+			continue
+		}
+		seen[root] = true
+		if st, err := os.Stat(root); err != nil || !st.IsDir() {
+			continue
+		}
+		found := ""
+		_ = filepath.WalkDir(root, func(path string, d os.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				return nil
+			}
+			if !d.IsDir() && strings.EqualFold(d.Name(), "qpdf.exe") {
+				found = path
+				return filepath.SkipAll
+			}
+			return nil
+		})
+		if found != "" {
+			return found
+		}
+	}
+	return ""
+}
+
+func pageList450(indices []int) string {
+	if len(indices) == 0 {
+		return ""
+	}
+	limit := len(indices)
+	if limit > 10 {
+		limit = 10
+	}
+	parts := make([]string, 0, limit+1)
+	for _, idx := range indices[:limit] {
+		parts = append(parts, strconv.Itoa(idx+1))
+	}
+	if len(indices) > limit {
+		parts = append(parts, fmt.Sprintf("+%d trang", len(indices)-limit))
+	}
+	return strings.Join(parts, ", ")
+}
