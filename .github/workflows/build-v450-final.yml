@@ -162,7 +162,7 @@ jobs:
               return os.WriteFile(path,b.Bytes(),0644)
           }
 
-          func noisyImagePDF450(path string, w, h int) error {
+          func scanLikeImagePDF450(path string, w, h int) error {
               var b bytes.Buffer
               b.WriteString("%PDF-1.4\n")
               offsets:=make([]int,6)
@@ -171,8 +171,19 @@ jobs:
               obj(2,func(){b.WriteString("<< /Type /Pages /Kids [3 0 R] /Count 1 >>")})
               obj(3,func(){b.WriteString("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /XObject << /Im0 4 0 R >> >> /Contents 5 0 R >>")})
               rawLen:=w*h*3;offsets[4]=b.Len();fmt.Fprintf(&b,"4 0 obj\n<< /Type /XObject /Subtype /Image /Width %d /Height %d /ColorSpace /DeviceRGB /BitsPerComponent 8 /Length %d >>\nstream\n",w,h,rawLen)
-              row:=make([]byte,w*3);var x uint32=1
-              for y:=0;y<h;y++{for i:=range row{x=x*1664525+1013904223;row[i]=byte(x>>24)};b.Write(row)}
+              row:=make([]byte,w*3);var seed uint32=1
+              for y:=0;y<h;y++{
+                  for px:=0;px<w;px++{
+                      seed=seed*1664525+1013904223
+                      noise:=int((seed>>28)&7)
+                      r,g,bl:=245-noise,245-noise,245-noise
+                      if y%44<3 && px>70 && px<w-70 { r,g,bl=45+noise,45+noise,45+noise }
+                      if px>w*2/3 && y>h/5 && y<h*4/5 { r,g,bl=150+noise,150+noise,150+noise }
+                      if px>w/4 && px<w/2 && y>h/3 && y<h*2/3 && (px+y)%19<2 { r,g,bl=180,65,65 }
+                      off:=px*3;row[off]=byte(r);row[off+1]=byte(g);row[off+2]=byte(bl)
+                  }
+                  b.Write(row)
+              }
               b.WriteString("\nendstream\nendobj\n")
               content:="q 612 0 0 792 0 0 cm /Im0 Do Q\n"
               obj(5,func(){fmt.Fprintf(&b,"<< /Length %d >>\nstream\n%sendstream",len(content),content)})
@@ -197,7 +208,7 @@ jobs:
               ctx:=context.Background();gs:=testBin450(t,"gswin64c.exe");qpdf:=testBin450(t,"qpdf.exe");d:=t.TempDir()
               tiny:=filepath.Join(d,"tiny.pdf");big:=filepath.Join(d,"big.pdf");mixed:=filepath.Join(d,"mixed.pdf")
               if err:=blankPDF450(tiny);err!=nil{t.Fatal(err)}
-              if err:=noisyImagePDF450(big,1800,1400);err!=nil{t.Fatal(err)}
+              if err:=scanLikeImagePDF450(big,1800,1400);err!=nil{t.Fatal(err)}
               merge450(t,ctx,qpdf,mixed,tiny,big)
               before,_:=os.Stat(mixed)
               r:=compressAutoPageAware450(ctx,gs,qpdf,mixed)
@@ -212,7 +223,7 @@ jobs:
           func TestLargeFileAndPagesOneGeneration450(t *testing.T){
               ctx:=context.Background();gs:=testBin450(t,"gswin64c.exe");qpdf:=testBin450(t,"qpdf.exe");d:=t.TempDir()
               var inputs []string
-              for i:=0;i<3;i++{p:=filepath.Join(d,fmt.Sprintf("big-%d.pdf",i+1));if err:=noisyImagePDF450(p,1800,1400);err!=nil{t.Fatal(err)};inputs=append(inputs,p)}
+              for i:=0;i<3;i++{p:=filepath.Join(d,fmt.Sprintf("big-%d.pdf",i+1));if err:=scanLikeImagePDF450(p,1800,1400);err!=nil{t.Fatal(err)};inputs=append(inputs,p)}
               combined:=filepath.Join(d,"combined.pdf");merge450(t,ctx,qpdf,combined,inputs...)
               before,_:=os.Stat(combined);if before.Size()<=20*1024*1024{t.Fatalf("test source is not >20MiB: %d",before.Size())}
               r:=compressAutoPageAware450(ctx,gs,qpdf,combined)
