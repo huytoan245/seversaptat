@@ -29,7 +29,7 @@ jobs:
         working-directory: tools/doi-ten-nen-pdf
         run: |
           & .\v450\patch-v450.ps1
-          if($LASTEXITCODE -ne 0){throw 'v4.4 source patch failed'}
+          if($LASTEXITCODE -ne 0){throw 'v4.5 source patch failed'}
 
       - name: Stage Ghostscript 10.08.0 offline engine
         working-directory: tools/doi-ten-nen-pdf
@@ -102,7 +102,7 @@ jobs:
           @'
           <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
           <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
-            <assemblyIdentity version="4.4.0.0" processorArchitecture="amd64" name="NguyenHuyToan.DuoiDuoiPDFNenFilePDF" type="win32"/>
+            <assemblyIdentity version="4.5.0.0" processorArchitecture="amd64" name="NguyenHuyToan.DuoiDuoiPDFNenFilePDF" type="win32"/>
             <description>Đuổi đuôi PDF và Nén file PDF v4.5.0</description>
             <dependency><dependentAssembly><assemblyIdentity type="win32" name="Microsoft.Windows.Common-Controls" version="6.0.0.0" processorArchitecture="*" publicKeyToken="6595b64144ccf1df" language="*"/></dependentAssembly></dependency>
             <application xmlns="urn:schemas-microsoft-com:asm.v3"><windowsSettings><dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true/pm</dpiAware><dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">PerMonitorV2</dpiAwareness><longPathAware xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">true</longPathAware></windowsSettings></application>
@@ -252,7 +252,7 @@ jobs:
           }
           '@|Set-Content auto450_test.go -Encoding utf8
           go test -run 'Test.*450' -v -timeout 20m
-          if($LASTEXITCODE -ne 0){throw 'v4.4 regression test failed'}
+          if($LASTEXITCODE -ne 0){throw 'v4.5 regression test failed'}
           Remove-Item auto450_test.go -Force
           $p=Start-Process (Join-Path $PWD 'payload\Duoi-duoi-PDF-va-Nen-file-PDF-core.exe') -WorkingDirectory (Join-Path $PWD 'payload') -ArgumentList '--self-test' -Wait -PassThru
           if($p.ExitCode -ne 0){throw 'core self-test failed'}
@@ -338,7 +338,7 @@ jobs:
           "module single450`n`ngo 1.23`n"|Set-Content go.mod -Encoding ascii
           @'
           <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-          <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0"><assemblyIdentity version="4.4.0.0" processorArchitecture="amd64" name="NguyenHuyToan.DuoiDuoiPDFNenFilePDF.Single" type="win32"/><description>Đuổi đuôi PDF và Nén file PDF v4.5.0</description><application xmlns="urn:schemas-microsoft-com:asm.v3"><windowsSettings><dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true/pm</dpiAware><dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">PerMonitorV2</dpiAwareness></windowsSettings></application></assembly>
+          <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0"><assemblyIdentity version="4.5.0.0" processorArchitecture="amd64" name="NguyenHuyToan.DuoiDuoiPDFNenFilePDF.Single" type="win32"/><description>Đuổi đuôi PDF và Nén file PDF v4.5.0</description><application xmlns="urn:schemas-microsoft-com:asm.v3"><windowsSettings><dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true/pm</dpiAware><dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">PerMonitorV2</dpiAwareness></windowsSettings></application></assembly>
           '@|Set-Content app.manifest -Encoding utf8
           go install github.com/akavel/rsrc@v0.10.2
           $rsrc=Join-Path (go env GOPATH) 'bin\rsrc.exe'; & $rsrc -ico app.ico -manifest app.manifest -o rsrc_windows_amd64.syso
