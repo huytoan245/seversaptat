@@ -206,7 +206,7 @@ func runCompress(ctx context.Context, root string, selected []string, auto bool,
 			}
 
 			if auto {
-				out.result = compressAutoPageAware460(ctx, gs, qpdf, it.path, policy, auto)
+				out.result = compressAutoPageAware460(ctx, gs, qpdf, it.path, policy)
 			} else {
 				out.result = compressAtDPI(ctx, gs, it.path, manualDPI)
 			}
