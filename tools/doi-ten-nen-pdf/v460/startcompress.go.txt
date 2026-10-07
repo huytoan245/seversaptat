@@ -1,0 +1,37 @@
+func startCompress() {
+	auto := send(ui.compAuto, 0x00F0, 0, 0) == 1
+	autoMode := selectedAutoMode460()
+
+	manualFilesMu.Lock()
+	fs := append([]string(nil), manualFiles...)
+	manualFilesMu.Unlock()
+	path := strings.TrimSpace(getText(ui.compPath))
+	var root string
+	if len(fs) == 0 {
+		root = path
+		if root == "" {
+			messageBox(ui.hwnd, "Chưa chọn dữ liệu", "Hãy chọn thư mục cần nén PDF.", 0x30)
+			return
+		}
+		if fi, err := os.Stat(root); err != nil || !fi.IsDir() {
+			messageBox(ui.hwnd, "Thư mục không hợp lệ", "Không thể truy cập thư mục đã chọn.", 0x10)
+			return
+		}
+	}
+	dpi := 220
+	if !auto {
+		dpi = selectedDPI()
+	}
+	beginWorker("compress", func(ctx context.Context) { runCompress(ctx, root, fs, auto, dpi, autoMode) })
+}
+
+func selectedAutoMode460() int {
+	if send(ui.autoMode2, 0x00F0, 0, 0) == 1 {
+		return 2
+	}
+	if send(ui.autoMode3, 0x00F0, 0, 0) == 1 {
+		return 3
+	}
+	return 1
+}
+
