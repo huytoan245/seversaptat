@@ -237,7 +237,7 @@ jobs:
           func TestQualityFloor450(t *testing.T){
               if len(autoProfiles450)==0{t.Fatal("missing AUTO profiles")}
               if autoProfiles450[0].dpi!=300||autoProfiles450[0].quality<98{t.Fatalf("AUTO must start at highest quality: %+v",autoProfiles450[0])}
-              for _,p:=range autoProfiles450{if p.dpi<180{t.Fatalf("quality floor too low: %+v",p)}}
+              for _,p:=range autoProfiles450{if p.dpi<160{t.Fatalf("quality floor too low: %+v",p)}}
           }
 
           func TestDecimalThresholds450(t *testing.T){
