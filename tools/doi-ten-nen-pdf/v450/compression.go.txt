@@ -32,7 +32,11 @@ var autoProfiles450 = []autoProfile450{
 	{180, 78, "180 DPI/Q78 • file cứng đầu"},
 	{180, 76, "180 DPI/Q76 • dự phòng"},
 	{180, 74, "180 DPI/Q74 • dự phòng"},
-	{180, 72, "180 DPI/Q72 • dự phòng cuối, vẫn giữ 180 DPI"},
+	{180, 72, "180 DPI/Q72 • dự phòng"},
+	{170, 84, "170 DPI/Q84 • file cực cứng đầu"},
+	{170, 80, "170 DPI/Q80 • file cực cứng đầu"},
+	{160, 84, "160 DPI/Q84 • dự phòng cuối"},
+	{160, 80, "160 DPI/Q80 • dự phòng cuối"},
 }
 
 const (
