@@ -1,0 +1,39 @@
+// Compress view
+	ui.compInfo = createControl("STATIC", "AUTO: chọn 1 trong 3 ngưỡng bên dưới • nén vừa đủ • ưu tiên chất lượng • không nén chồng hai lần.", WS_CHILD|SS_LEFT, 45, 180, 905, 28, hwnd, 0)
+	setFont(ui.compInfo, fontBold)
+
+	ui.compAuto = createControl("BUTTON", "AUTO", WS_CHILD|WS_TABSTOP|WS_GROUP|BS_AUTORADIOBUTTON, 45, 215, 120, 30, hwnd, ID_COMP_AUTO)
+	ui.compManual = createControl("BUTTON", "THỦ CÔNG", WS_CHILD|WS_TABSTOP|BS_AUTORADIOBUTTON, 175, 215, 150, 30, hwnd, ID_COMP_MANUAL)
+	pCheckRadioButton.Call(hwnd, uintptr(ID_COMP_AUTO), uintptr(ID_COMP_MANUAL), uintptr(ID_COMP_AUTO))
+
+	ui.autoMode1 = createControl("BUTTON", "1. <20 MB/file • <1 MB/trang (MẶC ĐỊNH)", WS_CHILD|WS_TABSTOP|WS_GROUP|BS_AUTORADIOBUTTON, 45, 250, 305, 30, hwnd, ID_AUTO_MODE1)
+	ui.autoMode2 = createControl("BUTTON", "2. <30 MB/file • <1 MB/trang", WS_CHILD|WS_TABSTOP|BS_AUTORADIOBUTTON, 355, 250, 280, 30, hwnd, ID_AUTO_MODE2)
+	ui.autoMode3 = createControl("BUTTON", "3. <20 MB/file • <500 KB/trang", WS_CHILD|WS_TABSTOP|BS_AUTORADIOBUTTON, 640, 250, 310, 30, hwnd, ID_AUTO_MODE3)
+	pCheckRadioButton.Call(hwnd, uintptr(ID_AUTO_MODE1), uintptr(ID_AUTO_MODE3), uintptr(ID_AUTO_MODE1))
+
+	ui.compPath = createControl("EDIT", "", WS_CHILD|WS_BORDER|ES_AUTOHSCROLL, 45, 295, 600, 34, hwnd, 0)
+	ui.compChooseFolder = createControl("BUTTON", "CHỌN THƯ MỤC", WS_CHILD|WS_TABSTOP|BS_PUSHBUTTON, 660, 295, 145, 34, hwnd, ID_COMP_FOLDER)
+	setFont(ui.compChooseFolder, fontBold)
+	ui.compChooseFiles = createControl("BUTTON", "CHỌN FILE", WS_CHILD|WS_TABSTOP|BS_PUSHBUTTON|WS_DISABLED, 815, 295, 135, 34, hwnd, ID_COMP_FILES)
+	setFont(ui.compChooseFiles, fontBold)
+
+	ui.dpi300 = createControl("BUTTON", "300 DPI", WS_CHILD|WS_TABSTOP|WS_GROUP|BS_AUTORADIOBUTTON|WS_DISABLED, 45, 345, 110, 30, hwnd, ID_DPI_300)
+	ui.dpi250 = createControl("BUTTON", "250 DPI", WS_CHILD|WS_TABSTOP|BS_AUTORADIOBUTTON|WS_DISABLED, 165, 345, 110, 30, hwnd, ID_DPI_250)
+	ui.dpi220 = createControl("BUTTON", "220 DPI", WS_CHILD|WS_TABSTOP|BS_AUTORADIOBUTTON|WS_DISABLED, 285, 345, 110, 30, hwnd, ID_DPI_220)
+	ui.dpi200 = createControl("BUTTON", "200 DPI", WS_CHILD|WS_TABSTOP|BS_AUTORADIOBUTTON|WS_DISABLED, 405, 345, 110, 30, hwnd, ID_DPI_200)
+	pCheckRadioButton.Call(hwnd, uintptr(ID_DPI_300), uintptr(ID_DPI_200), uintptr(ID_DPI_220))
+
+	ui.compStart = createControl("BUTTON", "BẮT ĐẦU NÉN", WS_CHILD|WS_TABSTOP|BS_PUSHBUTTON, 45, 390, 265, 44, hwnd, ID_COMP_START)
+	setFont(ui.compStart, fontBold)
+	ui.compStop = createControl("BUTTON", "DỪNG", WS_CHILD|WS_TABSTOP|BS_PUSHBUTTON|WS_DISABLED, 325, 390, 145, 44, hwnd, ID_COMP_STOP)
+	setFont(ui.compStop, fontBold)
+	ui.compEngine = createControl("STATIC", "Bộ phân tích trang + nén PDF: tích hợp sẵn • OFFLINE 100%", WS_CHILD|SS_LEFT, 490, 400, 460, 30, hwnd, 0)
+
+	ui.compProgress = createControl("msctls_progress32", "", WS_CHILD, 45, 460, 820, 26, hwnd, 0)
+	send(ui.compProgress, PBM_SETRANGE32, 0, 100)
+	ui.compPct = createControl("STATIC", "0%", WS_CHILD|SS_CENTER, 875, 460, 75, 26, hwnd, 0)
+	setFont(ui.compPct, fontBold)
+	ui.compCurrent = createControl("STATIC", "Đang xử lý: —", WS_CHILD|SS_LEFT, 45, 505, 905, 27, hwnd, 0)
+	ui.compFolder = createControl("STATIC", "Thư mục: —", WS_CHILD|SS_LEFT, 45, 540, 905, 50, hwnd, 0)
+	ui.compStats = createControl("STATIC", "Tổng PDF: 0    •    Đã nén: 0    •    Bỏ qua: 0    •    Lỗi: 0", WS_CHILD|SS_LEFT, 45, 605, 905, 55, hwnd, 0)
+	setFont(ui.compStats, fontBold)
