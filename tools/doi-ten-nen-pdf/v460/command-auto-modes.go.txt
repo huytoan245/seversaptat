@@ -1,0 +1,26 @@
+case ID_COMP_AUTO:
+				pCheckRadioButton.Call(hwnd, uintptr(ID_COMP_AUTO), uintptr(ID_COMP_MANUAL), uintptr(ID_COMP_AUTO))
+				for _, h := range []uintptr{ui.autoMode1, ui.autoMode2, ui.autoMode3} {
+					enable(h, true)
+				}
+				enable(ui.compChooseFiles, false)
+				for _, h := range []uintptr{ui.dpi300, ui.dpi250, ui.dpi220, ui.dpi200} {
+					enable(h, false)
+				}
+				manualFilesMu.Lock()
+				manualFiles = nil
+				manualFilesMu.Unlock()
+				if strings.HasPrefix(getText(ui.compPath), "Đã chọn ") {
+					setText(ui.compPath, "")
+				}
+			case ID_COMP_MANUAL:
+				pCheckRadioButton.Call(hwnd, uintptr(ID_COMP_AUTO), uintptr(ID_COMP_MANUAL), uintptr(ID_COMP_MANUAL))
+				for _, h := range []uintptr{ui.autoMode1, ui.autoMode2, ui.autoMode3} {
+					enable(h, false)
+				}
+				enable(ui.compChooseFiles, true)
+				for _, h := range []uintptr{ui.dpi300, ui.dpi250, ui.dpi220, ui.dpi200} {
+					enable(h, true)
+				}
+			case ID_AUTO_MODE1, ID_AUTO_MODE2, ID_AUTO_MODE3:
+				pCheckRadioButton.Call(hwnd, uintptr(ID_AUTO_MODE1), uintptr(ID_AUTO_MODE3), uintptr(id))
