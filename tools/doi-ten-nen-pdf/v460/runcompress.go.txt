@@ -206,7 +206,7 @@ func runCompress(ctx context.Context, root string, selected []string, auto bool,
 			}
 
 			if auto {
-				out.result = compressAutoPageAware460(ctx, gs, qpdf, it.path, policy)
+				out.result = compressAutoPageAware460(ctx, gs, qpdf, it.path, policy, auto)
 			} else {
 				out.result = compressAtDPI(ctx, gs, it.path, manualDPI)
 			}
@@ -230,7 +230,7 @@ func runCompress(ctx context.Context, root string, selected []string, auto bool,
 		if out.skipReason != "" {
 			skipped++
 			totalAfter += before
-			updateCompressProgress460(completed, len(candidates), totalPDF, out.path, compressed, skipped, failed, pagesScanned, pagesCompressed, totalBefore, totalAfter, out.skipReason, policy)
+			updateCompressProgress460(completed, len(candidates), totalPDF, out.path, compressed, skipped, failed, pagesScanned, pagesCompressed, totalBefore, totalAfter, out.skipReason, policy, auto)
 			continue
 		}
 
@@ -241,31 +241,35 @@ func runCompress(ctx context.Context, root string, selected []string, auto bool,
 			}
 			failed++
 			totalAfter += before
-			updateCompressProgress460(completed, len(candidates), totalPDF, out.path, compressed, skipped, failed, pagesScanned, pagesCompressed, totalBefore, totalAfter, "Lỗi: "+shortErr(out.result.Err), policy)
+			updateCompressProgress460(completed, len(candidates), totalPDF, out.path, compressed, skipped, failed, pagesScanned, pagesCompressed, totalBefore, totalAfter, "Lỗi: "+shortErr(out.result.Err), policy, auto)
 			continue
 		}
 
 		if !out.result.Replaced {
 			skipped++
 			totalAfter += before
-			updateCompressProgress460(completed, len(candidates), totalPDF, out.path, compressed, skipped, failed, pagesScanned, pagesCompressed, totalBefore, totalAfter, out.result.Note, policy)
+			updateCompressProgress460(completed, len(candidates), totalPDF, out.path, compressed, skipped, failed, pagesScanned, pagesCompressed, totalBefore, totalAfter, out.result.Note, policy, auto)
 			continue
 		}
 
 		compressed++
 		totalAfter += out.result.NewSize
 		note := fmt.Sprintf("%s: %.2f MB → %.2f MB", out.result.Note, mb(before), mb(out.result.NewSize))
-		updateCompressProgress460(completed, len(candidates), totalPDF, out.path, compressed, skipped, failed, pagesScanned, pagesCompressed, totalBefore, totalAfter, note, policy)
+		updateCompressProgress460(completed, len(candidates), totalPDF, out.path, compressed, skipped, failed, pagesScanned, pagesCompressed, totalBefore, totalAfter, note, policy, auto)
 	}
 
 	saved := totalBefore - totalAfter
 	if saved < 0 {
 		saved = 0
 	}
-	finishState("compress", "Hoàn thành", fmt.Sprintf("Chế độ AUTO: %d • file <%s • trang <%s\n\nTổng PDF: %d\nĐã thay đổi/nén thành công: %d\nBỏ qua/không cần nén: %d\nLỗi: %d\n\nTổng trang đã kiểm tra: %d\nTrang vượt ngưỡng đã tối ưu: %d\n\nDung lượng trước: %.2f MB\nDung lượng sau: %.2f MB\nTiết kiệm: %.2f MB", policy.Mode, policy.FileLabel, policy.PageLabel, totalPDF, compressed, skipped, failed, pagesScanned, pagesCompressed, mb(totalBefore), mb(totalAfter), mb(saved)), failed > 0)
+	if auto {
+		finishState("compress", "Hoàn thành", fmt.Sprintf("Chế độ AUTO: %d • file <%s • trang <%s\n\nTổng PDF: %d\nĐã thay đổi/nén thành công: %d\nBỏ qua/không cần nén: %d\nLỗi: %d\n\nTổng trang đã kiểm tra: %d\nTrang vượt ngưỡng đã tối ưu: %d\n\nDung lượng trước: %.2f MB\nDung lượng sau: %.2f MB\nTiết kiệm: %.2f MB", policy.Mode, policy.FileLabel, policy.PageLabel, totalPDF, compressed, skipped, failed, pagesScanned, pagesCompressed, mb(totalBefore), mb(totalAfter), mb(saved)), failed > 0)
+	} else {
+		finishState("compress", "Hoàn thành", fmt.Sprintf("Chế độ THỦ CÔNG • %d DPI\n\nTổng PDF: %d\nĐã thay đổi/nén thành công: %d\nBỏ qua/không giảm được dung lượng: %d\nLỗi: %d\n\nDung lượng trước: %.2f MB\nDung lượng sau: %.2f MB\nTiết kiệm: %.2f MB", manualDPI, totalPDF, compressed, skipped, failed, mb(totalBefore), mb(totalAfter), mb(saved)), failed > 0)
+	}
 }
 
-func updateCompressProgress460(done, n, totalPDF int, path string, compressed, skipped, failed, pagesScanned, pagesCompressed int, before, after int64, note string, policy autoPolicy460) {
+func updateCompressProgress460(done, n, totalPDF int, path string, compressed, skipped, failed, pagesScanned, pagesCompressed int, before, after int64, note string, policy autoPolicy460, auto bool) {
 	pct := 100
 	if n > 0 {
 		pct = done * 100 / n
@@ -275,6 +279,10 @@ func updateCompressProgress460(done, n, totalPDF int, path string, compressed, s
 		s.Progress = pct
 		s.Current = filepath.Base(path) + " — " + note
 		s.Folder = filepath.Dir(path)
-		s.Stats = fmt.Sprintf("AUTO %d • <%s/file • <%s/trang    |    PDF: %d • Đã xử lý: %d/%d • Trang quét: %d • Trang vượt ngưỡng: %d • Bỏ qua: %d • Lỗi: %d", policy.Mode, policy.FileLabel, policy.PageLabel, totalPDF, done, n, pagesScanned, pagesCompressed, skipped, failed)
+		if auto {
+			s.Stats = fmt.Sprintf("AUTO %d • <%s/file • <%s/trang    |    PDF: %d • Đã xử lý: %d/%d • Trang quét: %d • Trang vượt ngưỡng: %d • Bỏ qua: %d • Lỗi: %d", policy.Mode, policy.FileLabel, policy.PageLabel, totalPDF, done, n, pagesScanned, pagesCompressed, skipped, failed)
+		} else {
+			s.Stats = fmt.Sprintf("THỦ CÔNG    |    PDF: %d • Đã xử lý: %d/%d • Đã nén: %d • Bỏ qua: %d • Lỗi: %d • %.1f → %.1f MB", totalPDF, done, n, compressed, skipped, failed, mb(before), mb(after))
+		}
 	}, false)
 }
