@@ -1,0 +1,36 @@
+name: Inspect base UI quick
+
+on:
+  push:
+    branches:
+      - build/duoi-duoi-pdf-va-nen-file-pdf-v4.6.0-modes-20261007
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Decode base source and print UI anchors
+        working-directory: tools/doi-ten-nen-pdf
+        shell: pwsh
+        run: |
+          $b64=(Get-Content -Raw 'main.go.gz.b64').Trim()
+          $bytes=[Convert]::FromBase64String($b64)
+          $ms=[IO.MemoryStream]::new($bytes)
+          $gz=[IO.Compression.GZipStream]::new($ms,[IO.Compression.CompressionMode]::Decompress)
+          $sr=[IO.StreamReader]::new($gz,[Text.Encoding]::UTF8)
+          $src=$sr.ReadToEnd();$sr.Dispose();$gz.Dispose();$ms.Dispose()
+          $needles=@('AUTO','MANUAL','runCompress(','WM_COMMAND')
+          foreach($needle in $needles){
+            Write-Host "===== $needle ====="
+            $pos=0;$count=0
+            while(($i=$src.IndexOf($needle,$pos,[StringComparison]::OrdinalIgnoreCase)) -ge 0 -and $count -lt 10){
+              $start=[Math]::Max(0,$i-1500);$len=[Math]::Min(4500,$src.Length-$start)
+              Write-Host $src.Substring($start,$len);Write-Host '-----'
+              $pos=$i+$needle.Length;$count++
+            }
+          }
