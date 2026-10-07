@@ -1,0 +1,43 @@
+func switchMode(mode int) {
+	currentMode = mode
+	rename := mode == 1
+	for _, h := range []uintptr{ui.renameInfo, ui.renamePath, ui.renameChoose, ui.renameStart, ui.renameStop, ui.renameProgress, ui.renamePct, ui.renameCurrent, ui.renameFolder, ui.renameStats} {
+		show(h, rename)
+	}
+	for _, h := range []uintptr{ui.compInfo, ui.compPath, ui.compChooseFolder, ui.compChooseFiles, ui.compAuto, ui.compManual, ui.autoMode1, ui.autoMode2, ui.autoMode3, ui.dpi300, ui.dpi250, ui.dpi220, ui.dpi200, ui.compStart, ui.compStop, ui.compEngine, ui.compProgress, ui.compPct, ui.compCurrent, ui.compFolder, ui.compStats} {
+		show(h, !rename)
+	}
+	// IMPORTANT: switching views performs no network, no file scan, no cleanup.
+}
+
+func setBusy(mode string, busy bool) {
+	if mode == "rename" {
+		enable(ui.renameChoose, !busy)
+		enable(ui.renameStart, !busy)
+		enable(ui.renamePath, !busy)
+		enable(ui.renameStop, busy)
+		enable(ui.tabRename, !busy)
+		enable(ui.tabCompress, !busy)
+	} else {
+		enable(ui.compChooseFolder, !busy)
+		enable(ui.compStart, !busy)
+		enable(ui.compPath, !busy)
+		enable(ui.compStop, busy)
+		enable(ui.compAuto, !busy)
+		enable(ui.compManual, !busy)
+
+		auto := send(ui.compAuto, 0x00F0, 0, 0) == 1 // BM_GETCHECK
+		for _, h := range []uintptr{ui.autoMode1, ui.autoMode2, ui.autoMode3} {
+			enable(h, !busy && auto)
+		}
+
+		manual := send(ui.compManual, 0x00F0, 0, 0) == 1 // BM_GETCHECK
+		enable(ui.compChooseFiles, !busy && manual)
+		enable(ui.dpi300, !busy && manual)
+		enable(ui.dpi250, !busy && manual)
+		enable(ui.dpi220, !busy && manual)
+		enable(ui.dpi200, !busy && manual)
+		enable(ui.tabRename, !busy)
+		enable(ui.tabCompress, !busy)
+	}
+}
