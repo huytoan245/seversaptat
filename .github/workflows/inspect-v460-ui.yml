@@ -1,0 +1,39 @@
+name: Inspect v4.6 UI source
+
+on:
+  push:
+    branches:
+      - build/duoi-duoi-pdf-va-nen-file-pdf-v4.6.0-modes-20261007
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+          cache: false
+      - name: Reconstruct v4.5 source and print UI anchors
+        working-directory: tools/doi-ten-nen-pdf
+        run: |
+          & .\v450\patch-v450.ps1
+          $src=Get-Content -Raw 'main.go'
+          $needles=@('AUTO','MANUAL','runCompress(','WM_COMMAND','CreateWindowEx','compress')
+          foreach($needle in $needles){
+            Write-Host "===== $needle ====="
+            $pos=0;$count=0
+            while(($i=$src.IndexOf($needle,$pos,[StringComparison]::OrdinalIgnoreCase)) -ge 0 -and $count -lt 12){
+              $start=[Math]::Max(0,$i-1200);$len=[Math]::Min(3500,$src.Length-$start)
+              Write-Host $src.Substring($start,$len)
+              Write-Host '-----'
+              $pos=$i+$needle.Length;$count++
+            }
+          }
