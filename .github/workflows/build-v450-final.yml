@@ -223,13 +223,13 @@ jobs:
           func TestLargeFileAndPagesOneGeneration450(t *testing.T){
               ctx:=context.Background();gs:=testBin450(t,"gswin64c.exe");qpdf:=testBin450(t,"qpdf.exe");d:=t.TempDir()
               var inputs []string
-              for i:=0;i<3;i++{p:=filepath.Join(d,fmt.Sprintf("big-%d.pdf",i+1));if err:=scanLikeImagePDF450(p,1800,1400);err!=nil{t.Fatal(err)};inputs=append(inputs,p)}
+              for i:=0;i<16;i++{p:=filepath.Join(d,fmt.Sprintf("big-%d.pdf",i+1));if err:=scanLikeImagePDF450(p,1800,1400);err!=nil{t.Fatal(err)};inputs=append(inputs,p)}
               combined:=filepath.Join(d,"combined.pdf");merge450(t,ctx,qpdf,combined,inputs...)
               before,_:=os.Stat(combined);if before.Size()<=20*1024*1024{t.Fatalf("test source is not >20MiB: %d",before.Size())}
               r:=compressAutoPageAware450(ctx,gs,qpdf,combined)
               if r.Err!=nil||!r.Replaced{t.Fatalf("large file failed: %+v",r)}
               after,_:=os.Stat(combined);if after.Size()>=fileHardLimit450{t.Fatalf("output >= safe total limit: %d",after.Size())}
-              if pdfPageCount(ctx,gs,combined)!=3{t.Fatal("page count changed")}
+              if pdfPageCount(ctx,gs,combined)!=16{t.Fatal("page count changed")}
               assertAllPagesBelow450(t,ctx,qpdf,combined)
               t.Logf("large: %.2fMB -> %.2fMB; %s",mb(before.Size()),mb(after.Size()),r.Note)
           }
