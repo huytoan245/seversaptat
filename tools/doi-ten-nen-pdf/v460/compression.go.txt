@@ -32,7 +32,7 @@ func autoPolicyForMode460(mode int) autoPolicy460 {
 	}
 }
 
-// Quality-first ladder for the two <ngưỡng trang/page modes. Every attempt starts
+// Quality-first ladder for the two <1 MB/page modes. Every attempt starts
 // from the ORIGINAL page/PDF and the first acceptable result wins.
 var autoProfilesQuality460 = []autoProfile460{
 	{300, 98, "300 DPI/Q98"},
@@ -129,7 +129,7 @@ func compressAutoPageAware460(ctx context.Context, gs, qpdf, path string, policy
 		return base
 	}
 
-	// Preferred path: when one or more pages are vượt ngưỡng trang, touch ONLY those pages.
+	// Preferred path: when one or more pages exceed the selected page limit, touch ONLY those pages.
 	// Every candidate is generated from its ORIGINAL split page; untouched pages
 	// are copied losslessly from the original PDF. This is one compression
 	// generation, not "compress file then compress pages again".
@@ -186,7 +186,7 @@ func compressAutoPageAware460(ctx context.Context, gs, qpdf, path string, policy
 		}
 	}
 
-	// Whole-file fallback is used only when the ORIGINAL PDF itself is vượt ngưỡng file.
+	// Whole-file fallback is used only when the ORIGINAL PDF itself exceeds the selected file limit.
 	// Every profile below starts again from ORIGINAL path. A compressed trial is
 	// NEVER used as input to another Ghostscript pass: no cumulative quality loss.
 	whole := compressWholeOriginalVerified460(ctx, gs, qpdf, path, workDir, origPages, policy)
@@ -277,7 +277,7 @@ func compressWholeOriginalVerified460(ctx context.Context, gs, qpdf, original, w
 			continue
 		}
 
-		maxPage, overCount, verifyErr := verifyPageLimit460(ctx, qpdf, trial, workDir)
+		maxPage, overCount, verifyErr := verifyPageLimit460(ctx, qpdf, trial, workDir, policy)
 		if verifyErr != nil || overCount > 0 {
 			_ = os.Remove(trial)
 			continue
