@@ -1,0 +1,32 @@
+name: Inspect v4.5 runGhostscript
+
+on:
+  push:
+    branches:
+      - build/duoi-duoi-pdf-va-nen-file-pdf-v4.5.0-fast-1mb-20261007
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Decode and print compression helper
+        working-directory: tools/doi-ten-nen-pdf
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $b64=(Get-Content -Raw 'main.go.gz.b64').Trim()
+          $bytes=[Convert]::FromBase64String($b64)
+          $ms=[IO.MemoryStream]::new($bytes)
+          $gz=[IO.Compression.GZipStream]::new($ms,[IO.Compression.CompressionMode]::Decompress)
+          $sr=[IO.StreamReader]::new($gz,[Text.Encoding]::UTF8)
+          $src=$sr.ReadToEnd()
+          $sr.Dispose();$gz.Dispose();$ms.Dispose()
+          $start=$src.IndexOf('func runGhostscript')
+          if($start -lt 0){throw 'runGhostscript not found'}
+          $next=$src.IndexOf('func ', $start+30)
+          if($next -lt 0){$next=[Math]::Min($src.Length,$start+10000)}
+          Write-Host $src.Substring($start,$next-$start)
